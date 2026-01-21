@@ -13,105 +13,271 @@ import {
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
+import { supabase } from "@/lib/supabaseClient"
+
+/* -----------------------------------
+   Category → Sub Category Map
+----------------------------------- */
+const CATEGORY_MAP: Record<string, string[]> = {
+  "Access & Identity": [
+    "Password Reset",
+    "Account Locked",
+    "New User Access",
+    "Role / Permission Change",
+    "SSO Login Issues",
+  ],
+  Hardware: [
+    "Laptop Issue",
+    "Desktop Issue",
+    "Monitor",
+    "Keyboard / Mouse",
+    "Printer / Scanner",
+    "Hardware Replacement",
+  ],
+  "Software / Applications": [
+    "Application Not Working",
+    "Software Installation Request",
+    "License Request",
+    "Update / Patch Issue",
+    "Compatibility Issue",
+    "Internal / Custom Application",
+  ],
+  "Network & Connectivity": [
+    "No Internet",
+    "VPN Issues",
+    "Wi-Fi Slow / Unstable",
+    "LAN Issue",
+    "Firewall / Port Access Request",
+    "DNS Issue",
+  ],
+  "Email & Collaboration": [
+    "Email Not Sending / Receiving",
+    "Mailbox Full",
+    "Outlook / Gmail Issues",
+    "Teams / Slack Issues",
+    "Calendar / Meeting Issue",
+    "Shared Mailbox Access",
+  ],
+  Security: [
+    "Phishing / Suspicious Email",
+    "Malware / Virus",
+    "Device Compromised",
+    "Security Access Request",
+    "Data Loss Incident",
+    "Policy Violation",
+  ],
+  Database: [
+    "Database Down",
+    "Query Performance Issue",
+    "Database Access Request",
+    "Backup / Restore",
+  ],
+  "Service Requests": [
+    "New Laptop Request",
+    "Software Installation",
+    "VPN Access",
+    "Email Group Creation",
+  ],
+}
+
+/* -----------------------------------
+   User Profile Type
+----------------------------------- */
+type UserProfile = {
+  full_name: string
+  phone: string
+  employee_id: string | null
+  department: string | null
+  designation: string | null
+  position: string | null
+  manager: string | null
+  present_address: string | null
+  permanent_address: string | null
+  city: string | null
+  postal_code: string | null
+  country: string | null
+}
 
 export default function CreateTicketForm() {
+  const formRef = React.useRef<HTMLFormElement | null>(null)
   const [loading, setLoading] = React.useState(false)
+  const [category, setCategory] = React.useState<string>("")
+  const [profile, setProfile] = React.useState<UserProfile | null>(null)
+  const [requesterName, setRequesterName] = React.useState("")
+const [contact, setContact] = React.useState("")
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    setLoading(true)
 
-    const formData = new FormData(e.currentTarget)
+  /* -----------------------------------
+     Load User Profile
+  ----------------------------------- */
+  React.useEffect(() => {
+    const loadProfile = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-    const res = await fetch("/api/tickets/create", {
-      method: "POST",
-      body: formData,
-    })
+      if (!user) return
 
-    setLoading(false)
+      const { data } = await supabase
+        .from("users")
+        .select(`
+          full_name,
+          phone,
+          employee_id,
+          department,
+          designation,
+          position,
+          manager,
+          present_address,
+          permanent_address,
+          city,
+          postal_code,
+          country
+        `)
+        .eq("id", user.id)
+        .single()
 
-    if (!res.ok) {
-      toast.error("Failed to create ticket", {
-        description: "Please try again later",
-      })
-      return
+      if (data) {
+  setProfile(data)
+  setRequesterName(data.full_name ?? "")
+  setContact(data.phone ?? "")
+}
+
     }
 
-    toast.success("🎫 Ticket created successfully", {
-      description: "Your request has been submitted",
-    })
+    loadProfile()
+  }, [])
 
-    e.currentTarget.reset()
+  /* -----------------------------------
+     Submit Handler
+  ----------------------------------- */
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formRef.current) return
+
+    setLoading(true)
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!session?.access_token) {
+        toast.error("You are not logged in")
+        return
+      }
+
+      const formData = new FormData(formRef.current)
+
+      const res = await fetch("/api/tickets/create", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const data: { error?: string } = await res.json()
+        throw new Error(data.error || "Failed to create ticket")
+      }
+
+      toast.success("Ticket created successfully")
+      formRef.current.reset()
+      setCategory("")
+    } catch (err) {
+      console.error(err)
+      toast.error("Failed to create ticket")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Row 1 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <Label>Requester</Label>
-          <Input name="requester_name" placeholder="New" />
-        </div>
-        <div>
-          <Label>Contact</Label>
-          <Input name="contact" placeholder="Low" />
-        </div>
-      </div>
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
+
+      {/* Requester (Prefilled) */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+    <Label>Requester</Label>
+    <Input
+      name="requester_name"
+      value={requesterName}
+      onChange={(e) => setRequesterName(e.target.value)}
+      placeholder="Enter full name"
+    />
+  </div>
+
+  <div>
+    <Label>Contact</Label>
+    <Input
+      name="contact"
+      value={contact}
+      onChange={(e) => setContact(e.target.value)}
+      placeholder="Enter phone number"
+    />
+  </div>
+</div>
+
 
       {/* Subject */}
       <div>
         <Label>Subject *</Label>
-        <Input name="subject" placeholder="Enter Subject" required />
+        <Input name="subject" required />
       </div>
 
       {/* Description */}
       <div>
         <Label>Description</Label>
-        <Textarea
-          name="description"
-          placeholder="Enter Description"
-          rows={4}
-        />
+        <Textarea name="description" rows={4} />
       </div>
 
-      {/* Category */}
+      {/* Category / Sub Category */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label>Category</Label>
-          <Select name="category">
+          <Select
+            name="category"
+            value={category}
+            onValueChange={(v) => setCategory(v)}
+          >
             <SelectTrigger>
-              <SelectValue placeholder="Select Category" />
+              <SelectValue placeholder="Select category" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="new">New</SelectItem>
-              <SelectItem value="hardware">Hardware</SelectItem>
-              <SelectItem value="software">Software</SelectItem>
+              {Object.keys(CATEGORY_MAP).map((cat) => (
+                <SelectItem key={cat} value={cat}>
+                  {cat}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
 
         <div>
-          <Label>Sub-Category</Label>
-          <Select name="sub_category">
+          <Label>Sub Category</Label>
+          <Select name="sub_category" disabled={!category}>
             <SelectTrigger>
-              <SelectValue placeholder="Select Sub Category" />
+              <SelectValue placeholder="Select sub category" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
+              {(CATEGORY_MAP[category] ?? []).map((sub) => (
+                <SelectItem key={sub} value={sub}>
+                  {sub}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      {/* Priority / Status */}
+      {/* Priority / Urgency */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label>Priority</Label>
           <Select name="priority">
             <SelectTrigger>
-              <SelectValue placeholder="New" />
+              <SelectValue placeholder="Select priority" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="low">Low</SelectItem>
@@ -121,28 +287,11 @@ export default function CreateTicketForm() {
           </Select>
         </div>
 
-        <div>
-          <Label>Status</Label>
-          <Select name="status">
-            <SelectTrigger>
-              <SelectValue placeholder="Low" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="new">New</SelectItem>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Urgency / Impact */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label>Urgency</Label>
           <Select name="urgency">
             <SelectTrigger>
-              <SelectValue placeholder="Low" />
+              <SelectValue placeholder="Select urgency" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="low">Low</SelectItem>
@@ -150,11 +299,6 @@ export default function CreateTicketForm() {
               <SelectItem value="high">High</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-
-        <div>
-          <Label>Impact</Label>
-          <Input name="impact" placeholder="New" />
         </div>
       </div>
 
@@ -162,11 +306,11 @@ export default function CreateTicketForm() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label>Assignee</Label>
-          <Input name="assignee" placeholder="UI UX Team" />
+          <Input name="assignee" />
         </div>
         <div>
           <Label>Location</Label>
-          <Input name="location" placeholder="Bangalore" />
+          <Input name="location" />
         </div>
       </div>
 
@@ -174,38 +318,30 @@ export default function CreateTicketForm() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label>Inventory</Label>
-          <Input name="inventory" placeholder="Laptop" />
+          <Input name="inventory" />
         </div>
         <div>
           <Label>Attachments</Label>
-          <Input
-            type="file"
-            name="attachments"
-            multiple
-            accept=".png,.jpg,.jpeg,.pdf,.doc,.docx"
-          />
+          <Input type="file" name="attachments" multiple />
         </div>
       </div>
 
       {/* Link / CC */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <Label>Link</Label>
-          <Input name="link" placeholder="Link" />
+          <Label>Reference Link</Label>
+          <Input name="link" />
         </div>
         <div>
           <Label>CC</Label>
-          <Input name="cc" placeholder="abc@gmail.com" />
+          <Input name="cc" />
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex justify-end gap-4 pt-4">
-        <Button type="button" variant="outline">
-          Cancel
-        </Button>
+      <div className="flex justify-end pt-4">
         <Button type="submit" disabled={loading}>
-          {loading ? "Creating..." : "Create"}
+          {loading ? "Creating..." : "Create Ticket"}
         </Button>
       </div>
     </form>
