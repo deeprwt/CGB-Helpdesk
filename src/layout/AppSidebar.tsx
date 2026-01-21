@@ -18,89 +18,140 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 import SidebarWidget from "./SidebarWidget";
+import { supabase } from "@/lib/supabaseClient";
+
+type Role = "user" | "engineer" | "admin"
 
 type NavItem = {
-  name: string;
-  icon: React.ReactNode;
-  path?: string;
-  subItems?: { name: string; path: string; pro?: boolean; new?: boolean }[];
-};
+  name: string
+  icon: React.ReactNode
+  path?: string
+  roles?: Role[] 
+  subItems?: {
+    name: string
+    path: string
+    roles?: Role[]
+    pro?: boolean
+    new?: boolean
+  }[]
+}
+
 
 const navItems: NavItem[] = [
   {
     icon: <GridIcon />,
     name: "Dashboard",
-    subItems: [{ name: "Ecommerce", path: "/", pro: false }],
+     roles: ["user", "engineer", "admin"],
+    subItems: [{ name: "Overview", path: "/", pro: false, roles: ["user", "engineer", "admin"], }],
   },
   {
     icon: <CalenderIcon />,
     name: "Calendar",
     path: "/calendar",
+   roles: ["user", "engineer", "admin"],
   },
   {
     icon: <UserCircleIcon />,
     name: "User Profile",
     path: "/profile",
+     roles: ["user", "engineer", "admin"],
   },
   { 
     icon: <UserCircleIcon />,
     name: "User & Role",
     path: "/user",
+     roles: ["engineer", "admin"],
   },
-  {
-    name: "Forms",
-    icon: <ListIcon />,
-    subItems: [{ name: "Form Elements", path: "/form-elements", pro: false }],
-  },
-  {
-    name: "Tables",
-    icon: <TableIcon />,
-    subItems: [{ name: "Basic Tables", path: "/basic-tables", pro: false }],
-  },
-  {
-    name: "Pages",
-    icon: <PageIcon />,
-    subItems: [
-      { name: "Blank Page", path: "/blank", pro: false },
-      { name: "404 Error", path: "/error-404", pro: false },
-    ],
-  },
+  // {
+  //   name: "Forms",
+  //   icon: <ListIcon />,
+  //    roles: ["user", "engineer", "admin"],
+  //   subItems: [{ name: "Form Elements", path: "/form-elements", pro: false, roles: ["user", "engineer", "admin"], }],
+  // },
+  // {
+  //   name: "Tables",
+  //   icon: <TableIcon />,
+  //    roles: ["user", "engineer", "admin"],
+  //   subItems: [{ name: "Basic Tables", path: "/basic-tables", pro: false, roles: ["user", "engineer", "admin"], }],
+  // },
+  // {
+  //   name: "Pages",
+  //   icon: <PageIcon />,
+  //    roles: ["user", "engineer", "admin"],
+  //   subItems: [
+  //     { name: "Blank Page", path: "/blank", pro: false, roles: ["user", "engineer", "admin"], },
+  //     { name: "404 Error", path: "/error-404", pro: false, roles: ["user", "engineer", "admin"], },
+  //   ],
+  // },
 ];
 
 const othersItems: NavItem[] = [
-  {
-    icon: <PieChartIcon />,
-    name: "Charts",
-    subItems: [
-      { name: "Line Chart", path: "/line-chart", pro: false },
-      { name: "Bar Chart", path: "/bar-chart", pro: false },
-    ],
-  },
-  {
-    icon: <BoxCubeIcon />,
-    name: "UI Elements",
-    subItems: [
-      { name: "Alerts", path: "/alerts", pro: false },
-      { name: "Avatar", path: "/avatars", pro: false },
-      { name: "Badge", path: "/badge", pro: false },
-      { name: "Buttons", path: "/buttons", pro: false },
-      { name: "Images", path: "/images", pro: false },
-      { name: "Videos", path: "/videos", pro: false },
-    ],
-  },
-  {
-    icon: <PlugInIcon />,
-    name: "Authentication",
-    subItems: [
-      { name: "Sign In", path: "/signin", pro: false },
-      { name: "Sign Up", path: "/signup", pro: false },
-    ],
-  },
+  // {
+  //   icon: <PieChartIcon />,
+  //   name: "Charts",
+  //   subItems: [
+  //     { name: "Line Chart", path: "/line-chart", pro: false },
+  //     { name: "Bar Chart", path: "/bar-chart", pro: false },
+  //   ],
+  // },
+  // {
+  //   icon: <BoxCubeIcon />,
+  //   name: "UI Elements",
+  //   subItems: [
+  //     { name: "Alerts", path: "/alerts", pro: false },
+  //     { name: "Avatar", path: "/avatars", pro: false },
+  //     { name: "Badge", path: "/badge", pro: false },
+  //     { name: "Buttons", path: "/buttons", pro: false },
+  //     { name: "Images", path: "/images", pro: false },
+  //     { name: "Videos", path: "/videos", pro: false },
+  //   ],
+  // },
+  // {
+  //   icon: <PlugInIcon />,
+  //   name: "Authentication",
+  //   subItems: [
+  //     { name: "Sign In", path: "/signin", pro: false },
+  //     { name: "Sign Up", path: "/signup", pro: false },
+  //   ],
+  // },
 ];
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const [role, setRole] = useState<Role | null>(null)
+
+useEffect(() => {
+  const loadRole = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) return
+
+    const { data } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", session.user.id)
+      .single()
+
+    setRole((data?.role as Role) ?? "user")
+  }
+
+  loadRole()
+}, [])
+
+
+const filterByRole = (items: NavItem[], role: Role) =>
+  items
+    .filter((item) => !item.roles || item.roles.includes(role))
+    .map((item) => ({
+      ...item,
+      subItems: item.subItems?.filter(
+        (sub) => !sub.roles || sub.roles.includes(role)
+      ),
+    }));
+
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -261,9 +312,9 @@ const AppSidebar: React.FC = () => {
     });
 
     // If no submenu item matches, close the open submenu
-    if (!submenuMatched) {
-      setOpenSubmenu(null);
-    }
+    // if (!submenuMatched) {
+    //   setOpenSubmenu(null);
+    // }
   }, [pathname,isActive]);
 
   useEffect(() => {
@@ -357,7 +408,7 @@ const AppSidebar: React.FC = () => {
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(navItems, "main")}
+              {role && renderMenuItems(filterByRole(navItems, role), "main")}
             </div>
 
             <div className="">

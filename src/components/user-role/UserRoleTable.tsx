@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { supabase } from "@/lib/supabaseClient";
+
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -14,8 +16,8 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronDown } from "lucide-react";
 
+import { ArrowUpDown, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -33,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Employee = {
   id: string;
@@ -47,53 +50,87 @@ type Employee = {
   avatar: string;
 };
 
-const employees: Employee[] = [
-  {
-    id: "1",
-    name: "Shruti",
-    role: "admin",
-    empId: "EMP00134",
-    department: "-",
-    position: "-",
-    email: "shruti@gmail.com",
-    phone: "+91 9999888777",
-    location: "Bangalore",
-    avatar: "/images/user/user-31.jpg",
-  },
-  {
-    id: "2",
-    name: "Lakshit",
-    role: "engineer",
-    empId: "EMP00134",
-    department: "-",
-    position: "-",
-    email: "shrutix@gmail.com",
-    phone: "+91 9999888777",
-    location: "Pune",
-    avatar: "/images/user/user-31.jpg",
-  },
-  {
-    id: "3",
-    name: "Krishna",
-    role: "user",
-    empId: "EMP00134",
-    department: "-",
-    position: "-",
-    email: "krishna@gmail.com",
-    phone: "+91 9999888777",
-    location: "Delhi",
-    avatar: "/images/user/user-31.jpg",
-  },
-];
-
 export default function EmployeeTable() {
+  const [data, setData] = React.useState<Employee[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([
-    { id: "role", value: ["user"] },
-  ]);
+  const [columnFilters, setColumnFilters] =
+    React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
+
+  // 🔹 Fetch users from Supabase
+React.useEffect(() => {
+  const fetchUsers = async () => {
+    setLoading(true);
+
+    // 1️⃣ Get current session
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
+    const userId = session.user.id;
+
+    // 2️⃣ Check current user's role
+    const { data: currentUser, error: roleError } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .single();
+
+    if (roleError || currentUser?.role !== "admin") {
+      console.error("Unauthorized access");
+      setData([]);
+      setLoading(false);
+      return;
+    }
+
+    // 3️⃣ Admin → fetch ALL users
+    const { data, error } = await supabase
+      .from("users")
+      .select(`
+        id,
+        full_name,
+        role,
+        employee_id,
+        department,
+        position,
+        email,
+        phone,
+        city,
+        avatar_url
+      `);
+
+    if (!error && data) {
+      const mapped: Employee[] = data.map((u) => ({
+        id: u.id,
+        name: u.full_name ?? "-",
+        role: u.role ?? "user",
+        empId: u.employee_id ?? "-",
+        department: u.department ?? "-",
+        position: u.position ?? "-",
+        email: u.email ?? "-",
+        phone: u.phone ?? "-",
+        location: u.city ?? "-",
+        avatar: u.avatar_url ?? "/images/user/user-31.jpg",
+      }));
+
+      setData(mapped);
+    }
+
+    setLoading(false);
+  };
+
+  fetchUsers();
+}, []);
+
 
   const columns: ColumnDef<Employee>[] = [
     {
@@ -129,9 +166,12 @@ export default function EmployeeTable() {
       accessorKey: "role",
       header: "Role",
       cell: ({ row }) => (
-        <span className="capitalize font-semibold">{row.getValue("role")}</span>
+        <span className="capitalize font-semibold">
+          {row.getValue("role")}
+        </span>
       ),
-      filterFn: (row, id, value: string[]) => value.includes(row.getValue(id)),
+      filterFn: (row, id, value: string[]) =>
+        value.includes(row.getValue(id)),
     },
     { accessorKey: "empId", header: "Emp ID" },
     { accessorKey: "department", header: "Department" },
@@ -141,7 +181,9 @@ export default function EmployeeTable() {
       header: ({ column }) => (
         <Button
           variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          onClick={() =>
+            column.toggleSorting(column.getIsSorted() === "asc")
+          }
         >
           Official Email Address
           <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -153,9 +195,14 @@ export default function EmployeeTable() {
   ];
 
   const table = useReactTable({
-    data: employees,
+    data,
     columns,
-    state: { sorting, columnFilters, columnVisibility, rowSelection },
+    state: {
+      sorting,
+      columnFilters,
+      columnVisibility,
+      rowSelection,
+    },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
@@ -170,6 +217,7 @@ export default function EmployeeTable() {
 
   return (
     <div className="w-full">
+      {/* Filters */}
       <div className="flex items-center gap-2 py-4">
         <Input
           placeholder="Search email..."
@@ -198,7 +246,9 @@ export default function EmployeeTable() {
                   table
                     .getColumn("role")
                     ?.setFilterValue(
-                      checked ? [...prev, role] : prev.filter((r) => r !== role)
+                      checked
+                        ? [...prev, role]
+                        : prev.filter((r) => r !== role)
                     );
                 }}
               >
@@ -222,7 +272,9 @@ export default function EmployeeTable() {
                 <DropdownMenuCheckboxItem
                   key={column.id}
                   checked={column.getIsVisible()}
-                  onCheckedChange={(v) => column.toggleVisibility(!!v)}
+                  onCheckedChange={(v) =>
+                    column.toggleVisibility(!!v)
+                  }
                 >
                   {column.id}
                 </DropdownMenuCheckboxItem>
@@ -231,6 +283,7 @@ export default function EmployeeTable() {
         </DropdownMenu>
       </div>
 
+      {/* Table */}
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -247,8 +300,17 @@ export default function EmployeeTable() {
               </TableRow>
             ))}
           </TableHeader>
+
           <TableBody>
-            {table.getRowModel().rows.length ? (
+            {loading ? (
+              [...Array(5)].map((_, i) => (
+                <TableRow key={i}>
+                  <TableCell colSpan={columns.length}>
+                    <Skeleton className="h-10 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
                   {row.getVisibleCells().map((cell) => (
@@ -274,6 +336,8 @@ export default function EmployeeTable() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Pagination */}
       <div className="flex items-center justify-end space-x-2 py-4">
         <div className="text-muted-foreground flex-1 text-sm">
           {table.getFilteredSelectedRowModel().rows.length} of{" "}
