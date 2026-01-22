@@ -44,12 +44,12 @@ const navItems: NavItem[] = [
      roles: ["user", "engineer", "admin"],
     subItems: [{ name: "Overview", path: "/", pro: false, roles: ["user", "engineer", "admin"], }],
   },
-  // {
-  //   icon: <CalenderIcon />,
-  //   name: "Calendar",
-  //   path: "/calendar",
-  //  roles: ["user", "engineer", "admin"],
-  // },
+  {
+    icon: <CalenderIcon />,
+    name: "Tickets",
+    path: "/ticket",
+   roles: ["user", "engineer", "admin"],
+  },
   {
     icon: <UserCircleIcon />,
     name: "User Profile",

@@ -77,7 +77,7 @@ export async function POST(req: Request) {
         status: "new",
         urgency: formData.get("urgency")?.toString() ?? null,
         impact: formData.get("impact")?.toString() ?? null,
-        assignee: formData.get("assignee")?.toString() ?? null,
+        // assignee: formData.get("assignee")?.toString() ?? null,
         location: formData.get("location")?.toString() ?? null,
         inventory: formData.get("inventory")?.toString() ?? null,
         link: formData.get("link")?.toString() ?? null,

@@ -304,10 +304,10 @@ const [contact, setContact] = React.useState("")
 
       {/* Assignee / Location */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
+        {/* <div>
           <Label>Assignee</Label>
           <Input name="assignee" />
-        </div>
+        </div> */}
         <div>
           <Label>Location</Label>
           <Input name="location" />

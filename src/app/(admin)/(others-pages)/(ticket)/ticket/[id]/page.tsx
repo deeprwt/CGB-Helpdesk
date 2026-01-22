@@ -4,11 +4,12 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ArrowLeft, Send } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
+
 import TicketMetaPanel from "@/components/tickets/ticket-details/TicketMetaPanel"
+import TicketChat from "@/components/tickets/ticket-details/TicketChat"
 
 /* -----------------------------------
    Types
@@ -43,6 +44,13 @@ type Message = {
   created_at: string
 }
 
+type ChatProfile = {
+  id: string
+  name: string
+  avatar_url: string | null
+  role: "user" | "engineer"
+}
+
 export default function TicketDetailsPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -51,8 +59,8 @@ export default function TicketDetailsPage() {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [attachments, setAttachments] = React.useState<Attachment[]>([])
   const [profile, setProfile] = React.useState<Profile | null>(null)
+  const [userId, setUserId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
-  const [message, setMessage] = React.useState("")
 
   /* -----------------------------------
      Load Ticket + Messages + Profile
@@ -70,13 +78,26 @@ export default function TicketDetailsPage() {
         return
       }
 
-      const [{ data: ticketData }, { data: chatData }, { data: attachmentData }, { data: profileData }] =
-        await Promise.all([
-          supabase.from("tickets").select("*").eq("id", id).single(),
-          supabase.from("ticket_messages").select("*").eq("ticket_id", id).order("created_at"),
-          supabase.from("ticket_attachments").select("id, file_name, file_path").eq("ticket_id", id),
-          supabase.from("users").select("avatar_url").eq("id", user.id).single(),
-        ])
+      setUserId(user.id)
+
+      const [
+        { data: ticketData },
+        { data: chatData },
+        { data: attachmentData },
+        { data: profileData },
+      ] = await Promise.all([
+        supabase.from("tickets").select("*").eq("id", id).single(),
+        supabase
+          .from("ticket_messages")
+          .select("*")
+          .eq("ticket_id", id)
+          .order("created_at"),
+        supabase
+          .from("ticket_attachments")
+          .select("id, file_name, file_path")
+          .eq("ticket_id", id),
+        supabase.from("users").select("avatar_url").eq("id", user.id).single(),
+      ])
 
       setTicket(ticketData)
       setMessages(chatData ?? [])
@@ -88,46 +109,30 @@ export default function TicketDetailsPage() {
     loadData()
   }, [id])
 
-  /* -----------------------------------
-     Send Message
-  ----------------------------------- */
-  const sendMessage = async () => {
-    if (!message.trim()) return
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) return
-
-    await supabase.from("ticket_messages").insert({
-      ticket_id: id,
-      sender_id: user.id,
-      sender_role: "user",
-      message,
-    })
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        message,
-        sender_id: user.id,
-        sender_role: "user",
-        created_at: new Date().toISOString(),
-      },
-    ])
-
-    setMessage("")
-  }
-
-  if (loading || !ticket) {
+  if (loading || !ticket || !userId) {
     return (
       <div className="p-6">
         <Skeleton className="h-6 w-40 mb-4" />
         <Skeleton className="h-64 w-full" />
       </div>
     )
+  }
+
+  /* -----------------------------------
+     Chat Profiles (FIXED TYPES)
+  ----------------------------------- */
+  const currentUserProfile: ChatProfile = {
+    id: userId,
+    name: ticket.requester_name,
+    avatar_url: profile?.avatar_url ?? null,
+    role: "user",
+  }
+
+  const engineerProfile: ChatProfile = {
+    id: ticket.assignee ?? "engineer",
+    name: "Support Engineer",
+    avatar_url: null,
+    role: "engineer",
   }
 
   return (
@@ -141,8 +146,7 @@ export default function TicketDetailsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* LEFT: Ticket Meta */}
+        {/* LEFT */}
         <TicketMetaPanel
           ticketId={ticket.id}
           subject={ticket.subject}
@@ -155,42 +159,29 @@ export default function TicketDetailsPage() {
           link={ticket.link}
         />
 
-        {/* CENTER: Chat */}
+        {/* CENTER */}
         <Card className="p-5 flex flex-col">
           <h3 className="font-semibold mb-3">Conversation</h3>
 
-          <div className="flex-1 space-y-3 overflow-y-auto pr-2">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
-                  msg.sender_role === "user"
-                    ? "ml-auto bg-blue-100 text-blue-900"
-                    : "bg-gray-100 text-gray-900"
-                }`}
-              >
-                {msg.message}
-                <div className="text-[10px] mt-1 opacity-60">
-                  {new Date(msg.created_at).toLocaleTimeString()}
-                </div>
-              </div>
-            ))}
-          </div>
+          <TicketChat
+  ticketId={id}
+  messages={messages}
+  setMessages={setMessages}
+  currentUser={currentUserProfile}
+  otherUser={engineerProfile}
+  onSend={async (text) => {
+    await supabase.from("ticket_messages").insert({
+      ticket_id: id,
+      sender_id: userId,
+      sender_role: "user",
+      message: text,
+    })
+  }}
+/>
 
-          <div className="mt-4 flex gap-2">
-            <Textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type a message..."
-              rows={2}
-            />
-            <Button onClick={sendMessage}>
-              <Send className="w-4 h-4" />
-            </Button>
-          </div>
         </Card>
 
-        {/* RIGHT: Activity */}
+        {/* RIGHT */}
         <Card className="p-5 space-y-4">
           <h3 className="font-semibold">Activity</h3>
 

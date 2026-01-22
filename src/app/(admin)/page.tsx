@@ -8,6 +8,7 @@ import StatisticsChart from "@/components/ecommerce/StatisticsChart";
 import DemographicCard from "@/components/ecommerce/DemographicCard";
 import TicketOverviewCards from "@/components/tickets/TicketOverviewCards";
 import UserLatestTickets from "@/components/tickets/UserLatestTickets";
+import RoleBasedTickets from "@/components/user-role/RoleBasedTickets";
 
 export const metadata: Metadata = {
   title:
@@ -24,7 +25,7 @@ export default function Ecommerce() {
             <TicketOverviewCards />
       </div>
       <div className="col-span-12">
-        <UserLatestTickets />
+        <RoleBasedTickets />
       </div>
       {/* <div className="col-span-12 space-y-6 xl:col-span-7">
         <EcommerceMetrics />

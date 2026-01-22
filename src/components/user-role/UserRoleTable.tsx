@@ -66,7 +66,6 @@ React.useEffect(() => {
   const fetchUsers = async () => {
     setLoading(true);
 
-    // 1️⃣ Get current session
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -78,22 +77,20 @@ React.useEffect(() => {
 
     const userId = session.user.id;
 
-    // 2️⃣ Check current user's role
     const { data: currentUser, error: roleError } = await supabase
       .from("users")
       .select("role")
       .eq("id", userId)
       .single();
 
-    if (roleError || currentUser?.role !== "admin") {
+    if (roleError || !["admin", "engineer"].includes(currentUser.role)) {
       console.error("Unauthorized access");
       setData([]);
       setLoading(false);
       return;
     }
 
-    // 3️⃣ Admin → fetch ALL users
-    const { data, error } = await supabase
+    let query = supabase
       .from("users")
       .select(`
         id,
@@ -108,21 +105,27 @@ React.useEffect(() => {
         avatar_url
       `);
 
-    if (!error && data) {
-      const mapped: Employee[] = data.map((u) => ({
-        id: u.id,
-        name: u.full_name ?? "-",
-        role: u.role ?? "user",
-        empId: u.employee_id ?? "-",
-        department: u.department ?? "-",
-        position: u.position ?? "-",
-        email: u.email ?? "-",
-        phone: u.phone ?? "-",
-        location: u.city ?? "-",
-        avatar: u.avatar_url ?? "/images/user/user-31.jpg",
-      }));
+    if (currentUser.role === "engineer") {
+      query = query.in("role", ["user", "engineer"]);
+    }
 
-      setData(mapped);
+    const { data, error } = await query;
+
+    if (!error && data) {
+      setData(
+        data.map((u) => ({
+          id: u.id,
+          name: u.full_name ?? "-",
+          role: u.role ?? "user",
+          empId: u.employee_id ?? "-",
+          department: u.department ?? "-",
+          position: u.position ?? "-",
+          email: u.email ?? "-",
+          phone: u.phone ?? "-",
+          location: u.city ?? "-",
+          avatar: u.avatar_url ?? "/images/user/user-31.jpg",
+        }))
+      );
     }
 
     setLoading(false);

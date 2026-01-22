@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Eye } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { STATUS_STYLE } from "@/lib/ticket-utils"
+
 
 type Ticket = {
   id: string
@@ -44,13 +46,7 @@ function timeAgo(date: string) {
 /* -----------------------------------
    Status → Badge Variant
 ----------------------------------- */
-const STATUS_VARIANT: Record<Ticket["status"], "default" | "secondary" | "destructive" | "outline"> =
-{
-  new: "secondary",
-  open: "outline",
-  in_progress: "default",
-  closed: "secondary",
-}
+
 
 export default function UserLatestTickets() {
   const router = useRouter()
@@ -138,9 +134,10 @@ export default function UserLatestTickets() {
                   </TableCell>
 
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[ticket.status]}>
+                    <Badge className={STATUS_STYLE[ticket.status]}>
                       {ticket.status.replace("_", " ").toUpperCase()}
                     </Badge>
+
                   </TableCell>
 
                   <TableCell>{ticket.category ?? "-"}</TableCell>
