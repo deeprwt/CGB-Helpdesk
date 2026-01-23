@@ -96,7 +96,7 @@ export default function TicketMetaPanel({
 
       {/* Reporter */}
       <div>
-        <p className="text-sm text-muted-foreground mb-1">Reporter</p>
+        <p className="text-sm text-muted-foreground mb-1">User</p>
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8">
             <AvatarImage src={requesterAvatar ?? undefined} />
