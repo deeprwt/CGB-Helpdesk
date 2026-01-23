@@ -96,39 +96,43 @@ export async function POST(req: Request) {
     /* -----------------------------------
        6️⃣ Upload attachments
     ----------------------------------- */
-    for (const file of files) {
-      if (!(file instanceof File) || file.size === 0) continue
+for (const file of files) {
+  if (
+    typeof file !== "object" ||
+    !("arrayBuffer" in file) ||
+    !("size" in file) ||
+    file.size === 0
+  ) {
+    continue
+  }
 
-      const arrayBuffer = await file.arrayBuffer()
-const buffer = Buffer.from(arrayBuffer)
+  const arrayBuffer = await file.arrayBuffer()
+  const buffer = Buffer.from(arrayBuffer)
 
-      const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
+  const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
 
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("ticket-attachments")
-        .upload(filePath, buffer, {
-          contentType: file.type,
-          upsert: false,
-        })
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from("ticket-attachments")
+    .upload(filePath, buffer, {
+      contentType: file.type,
+      upsert: false,
+    })
 
-      if (uploadError) {
-        throw uploadError
-      }
+  if (uploadError) throw uploadError
 
-      const { error: attachmentError } = await supabaseAdmin
-        .from("ticket_attachments")
-        .insert({
-          ticket_id: ticket.id,
-          file_name: file.name,
-          file_path: filePath,
-          file_type: file.type,
-          file_size: file.size,
-        })
+  const { error: attachmentError } = await supabaseAdmin
+    .from("ticket_attachments")
+    .insert({
+      ticket_id: ticket.id,
+      file_name: file.name,
+      file_path: filePath,
+      file_type: file.type,
+      file_size: file.size,
+    })
 
-      if (attachmentError) {
-        throw attachmentError
-      }
-    }
+  if (attachmentError) throw attachmentError
+}
+
 
     /* -----------------------------------
        7️⃣ Success response
