@@ -8,7 +8,10 @@ export async function POST(req: Request) {
     /* -----------------------------------
        1️⃣ Validate Authorization header
     ----------------------------------- */
-    const authHeader = req.headers.get("authorization")
+    const authHeader =
+  req.headers.get("authorization") ??
+  req.headers.get("Authorization")
+
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -96,7 +99,9 @@ export async function POST(req: Request) {
     for (const file of files) {
       if (!(file instanceof File) || file.size === 0) continue
 
-      const buffer = await file.arrayBuffer()
+      const arrayBuffer = await file.arrayBuffer()
+const buffer = Buffer.from(arrayBuffer)
+
       const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
 
       const { error: uploadError } = await supabaseAdmin.storage
