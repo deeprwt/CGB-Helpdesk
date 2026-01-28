@@ -62,6 +62,12 @@ const navItems: NavItem[] = [
     path: "/user",
      roles: ["engineer", "admin"],
   },
+    { 
+    icon: <UserCircleIcon />,
+    name: "Assets",
+    path: "/assets",
+     roles: ["engineer", "admin"],
+  },
   // {
   //   name: "Forms",
   //   icon: <ListIcon />,

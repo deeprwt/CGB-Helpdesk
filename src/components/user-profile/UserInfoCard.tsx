@@ -1,74 +1,132 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { supabase } from "@/lib/supabaseClient";
+import * as React from "react"
+import { supabase } from "@/lib/supabaseClient"
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { toast } from "sonner";
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { toast } from "sonner"
+
+/* ---------------- TYPES ---------------- */
+
+type Role = "user" | "engineer" | "admin"
 
 type UserProfile = {
-  id: string;
-  email: string;
-  full_name: string;
-  employee_id: string | null;
-  designation: string | null;
-  department: string | null;
-  position: string | null;
-  manager: string | null;
-  present_address: string | null;
-  permanent_address: string | null;
-  city: string | null;
-  postal_code: string | null;
-  country: string | null;
-  avatar_url: string | null;
-};
+  id: string
+  email: string
+  role?: Role
+  full_name: string
+  employee_id: string | null
+  designation: string | null
+  department: string | null
+  position: string | null
+  manager: string | null
+  present_address: string | null
+  permanent_address: string | null
+  city: string | null
+  postal_code: string | null
+  country: string | null
+  avatar_url: string | null
+}
 
-export default function UserInfoCard() {
-  const [open, setOpen] = React.useState(false);
-  const [loading, setLoading] = React.useState(false);
-  const [profile, setProfile] = React.useState<UserProfile | null>(null);
+type UserInfoCardProps = {
+  profileId?: string
+  currentRole?: Role | null
+}
 
-  // Fetch profile
+/* ---------------- COMPONENT ---------------- */
+
+export default function UserInfoCard({
+  profileId,
+  currentRole,
+}: UserInfoCardProps) {
+  const [open, setOpen] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+
+  const [profile, setProfile] =
+    React.useState<UserProfile | null>(null)
+
+  const [currentUserId, setCurrentUserId] =
+    React.useState<string>("")
+
+  /* ---------------- LOAD PROFILE ---------------- */
+
   React.useEffect(() => {
     const loadProfile = async () => {
       const {
         data: { user },
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getUser()
 
-      if (!user) return;
+      if (!user) return
 
-      const { data } = await supabase
+      setCurrentUserId(user.id)
+
+      // ✅ CRITICAL FIX: safe target id
+      const targetId = profileId ?? user.id
+
+      const { data, error } = await supabase
         .from("users")
         .select("*")
-        .eq("id", user.id)
-        .single();
+        .eq("id", targetId)
+        .maybeSingle()
 
-      setProfile(data);
-    };
+      if (error || !data) {
+        console.error("Profile load failed:", error)
+        toast.error("Unable to load profile")
+        return
+      }
 
-    loadProfile();
-  }, []);
+      setProfile(data)
+    }
+
+    loadProfile()
+  }, [profileId])
+
+  /* ---------------- PERMISSIONS ---------------- */
+
+  const canEdit =
+    profile &&
+    (
+      // own profile
+      profile.id === currentUserId ||
+
+      // engineer → user
+      (currentRole === "engineer" &&
+        profile.role === "user") ||
+
+      // admin → user + engineer
+      (currentRole === "admin" &&
+        (profile.role === "user" ||
+          profile.role === "engineer"))
+    )
+
+  /* ---------------- HANDLERS ---------------- */
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement>
-  ): void => {
-    if (!profile) return;
-    setProfile({ ...profile, [e.target.name]: e.target.value });
-  };
+  ) => {
+    if (!profile) return
+    setProfile({
+      ...profile,
+      [e.target.name]: e.target.value,
+    })
+  }
 
   const handleSave = async () => {
-    if (!profile) return;
+    if (!profile || !canEdit) {
+      toast.error("Unauthorized action")
+      return
+    }
 
-    setLoading(true);
+    setLoading(true)
 
     const { error } = await supabase
       .from("users")
@@ -85,20 +143,22 @@ export default function UserInfoCard() {
         postal_code: profile.postal_code,
         country: profile.country,
       })
-      .eq("id", profile.id);
+      .eq("id", profile.id)
 
-    setLoading(false);
+    setLoading(false)
 
     if (error) {
-      toast.error(error.message);
-      return;
+      toast.error(error.message)
+      return
     }
 
-    toast.success("Profile updated successfully");
-    setOpen(false);
-  };
+    toast.success("Profile updated successfully")
+    setOpen(false)
+  }
 
-  if (!profile) return null;
+  if (!profile) return null
+
+  /* ---------------- UI ---------------- */
 
   return (
     <div className="rounded-2xl border p-6">
@@ -118,13 +178,17 @@ export default function UserInfoCard() {
             <p className="text-sm text-muted-foreground">
               {profile.email}
             </p>
-            <p className="text-sm">{profile.designation}</p>
+            <p className="text-sm">
+              {profile.designation ?? "-"}
+            </p>
           </div>
         </div>
 
-        <Button variant="outline" onClick={() => setOpen(true)}>
-          Edit
-        </Button>
+        {canEdit && (
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            Edit
+          </Button>
+        )}
       </div>
 
       {/* EDIT MODAL */}
@@ -135,59 +199,26 @@ export default function UserInfoCard() {
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Full Name</Label>
-              <Input
-                name="full_name"
-                value={profile.full_name}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Employee ID</Label>
-              <Input
-                name="employee_id"
-                value={profile.employee_id ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Department</Label>
-              <Input
-                name="department"
-                value={profile.department ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Designation</Label>
-              <Input
-                name="designation"
-                value={profile.designation ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Position</Label>
-              <Input
-                name="position"
-                value={profile.position ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Manager</Label>
-              <Input
-                name="manager"
-                value={profile.manager ?? ""}
-                onChange={handleChange}
-              />
-            </div>
+            {[
+              ["full_name", "Full Name"],
+              ["employee_id", "Employee ID"],
+              ["department", "Department"],
+              ["designation", "Designation"],
+              ["position", "Position"],
+              ["manager", "Manager"],
+              ["city", "City"],
+              ["postal_code", "Postal Code"],
+              ["country", "Country"],
+            ].map(([name, label]) => (
+              <div key={name}>
+                <Label>{label}</Label>
+                <Input
+                  name={name}
+                  value={(profile as Record<string, string | null>)[name] ?? ""}
+                  onChange={handleChange}
+                />
+              </div>
+            ))}
 
             <div className="col-span-2">
               <Label>Present Address</Label>
@@ -206,33 +237,6 @@ export default function UserInfoCard() {
                 onChange={handleChange}
               />
             </div>
-
-            <div>
-              <Label>City</Label>
-              <Input
-                name="city"
-                value={profile.city ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Postal Code</Label>
-              <Input
-                name="postal_code"
-                value={profile.postal_code ?? ""}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div>
-              <Label>Country</Label>
-              <Input
-                name="country"
-                value={profile.country ?? ""}
-                onChange={handleChange}
-              />
-            </div>
           </div>
 
           <DialogFooter>
@@ -246,5 +250,5 @@ export default function UserInfoCard() {
         </DialogContent>
       </Dialog>
     </div>
-  );
+  )
 }

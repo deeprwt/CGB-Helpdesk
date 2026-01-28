@@ -42,7 +42,7 @@ export default function TicketOverviewCards() {
          USER STATS
       ---------------------------- */
       if (role === "user") {
-        const [total, newTickets, openTickets, closedTickets] =
+        const [total, newTickets, openTickets, holdTickets, closedTickets] =
           await Promise.all([
             supabase
               .from("tickets")
@@ -65,6 +65,13 @@ export default function TicketOverviewCards() {
               .from("tickets")
               .select("id", { count: "exact", head: true })
               .eq("requester_id", user.id)
+              .eq("status", "hold"),
+
+
+            supabase
+              .from("tickets")
+              .select("id", { count: "exact", head: true })
+              .eq("requester_id", user.id)
               .eq("status", "closed"),
           ])
 
@@ -72,6 +79,7 @@ export default function TicketOverviewCards() {
           { label: "Total Tickets", value: total.count ?? 0 },
           { label: "New Tickets", value: newTickets.count ?? 0 },
           { label: "Open Tickets", value: openTickets.count ?? 0 },
+          { label: "Hold Tickets", value: holdTickets.count ?? 0 },
           { label: "Closed Tickets", value: closedTickets.count ?? 0 },
         ])
       }
@@ -84,6 +92,7 @@ export default function TicketOverviewCards() {
           total,
           queueNew,
           openAssigned,
+          hold,
           closedAssigned,
         ] = await Promise.all([
           // Total tickets visible to engineer
@@ -105,6 +114,13 @@ export default function TicketOverviewCards() {
             .eq("assignee", user.id)
             .eq("status", "open"),
 
+          // Hold tickets assigned to engineer
+          supabase
+            .from("tickets")
+            .select("id", { count: "exact", head: true })
+            .eq("assignee", user.id)
+            .eq("status", "hold"),
+
           // Closed tickets handled by engineer
           supabase
             .from("tickets")
@@ -117,9 +133,11 @@ export default function TicketOverviewCards() {
           { label: "Total Tickets", value: total.count ?? 0 },
           { label: "New in Queue", value: queueNew.count ?? 0 },
           { label: "Open (Assigned)", value: openAssigned.count ?? 0 },
+          { label: "Hold Tickets", value: hold.count ?? 0 },
           { label: "Closed (Resolved)", value: closedAssigned.count ?? 0 },
         ])
       }
+
 
       // admin → intentionally empty for now
       setLoading(false)
@@ -130,8 +148,8 @@ export default function TicketOverviewCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
           <Card key={i} className="p-5">
             <Skeleton className="h-5 w-24 mb-2" />
             <Skeleton className="h-8 w-16" />
@@ -144,7 +162,7 @@ export default function TicketOverviewCards() {
   if (stats.length === 0) return null
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
       {stats.map((stat) => (
         <Card key={stat.label} className="p-5">
           <div className="flex items-center justify-between">

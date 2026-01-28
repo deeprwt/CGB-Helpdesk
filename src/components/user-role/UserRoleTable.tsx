@@ -1,8 +1,9 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import Image from "next/image";
-import { supabase } from "@/lib/supabaseClient";
+import * as React from "react"
+import Image from "next/image"
+import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabaseClient"
 
 import {
   ColumnDef,
@@ -15,18 +16,20 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
-} from "@tanstack/react-table";
-
-import { ArrowUpDown, ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+} from "@tanstack/react-table"
+import {
+  Eye
+} from "lucide-react"
+import { ArrowUpDown, ChevronDown } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import {
   Table,
   TableBody,
@@ -34,65 +37,77 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Skeleton } from "@/components/ui/skeleton";
+} from "@/components/ui/table"
+import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "sonner"
+
+/* ---------------- TYPES ---------------- */
+
+type Role = "user" | "engineer" | "admin"
 
 type Employee = {
-  id: string;
-  name: string;
-  role: "user" | "engineer" | "admin";
-  empId: string;
-  department: string;
-  position: string;
-  email: string;
-  phone: string;
-  location: string;
-  avatar: string;
-};
+  id: string
+  name: string
+  role: Role
+  empId: string
+  department: string
+  position: string
+  email: string
+  phone: string
+  location: string
+  avatar: string
+}
+
+/* ---------------- COMPONENT ---------------- */
 
 export default function EmployeeTable() {
-  const [data, setData] = React.useState<Employee[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const router = useRouter()
 
-  const [sorting, setSorting] = React.useState<SortingState>([]);
+  const [data, setData] = React.useState<Employee[]>([])
+  const [loading, setLoading] = React.useState(true)
+
+  const [currentRole, setCurrentRole] =
+    React.useState<Role>("user")
+
+  const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] =
-    React.useState<ColumnFiltersState>([]);
+    React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({});
-  const [rowSelection, setRowSelection] = React.useState({});
+    React.useState<VisibilityState>({})
+  const [rowSelection, setRowSelection] = React.useState({})
 
-  // 🔹 Fetch users from Supabase
-React.useEffect(() => {
-  const fetchUsers = async () => {
-    setLoading(true);
+  /* ---------------- FETCH USERS ---------------- */
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+  React.useEffect(() => {
+    const fetchUsers = async () => {
+      setLoading(true)
 
-    if (!session) {
-      setLoading(false);
-      return;
-    }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
 
-    const userId = session.user.id;
+      if (!session) {
+        setLoading(false)
+        return
+      }
 
-    const { data: currentUser, error: roleError } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", userId)
-      .single();
+      const userId = session.user.id
 
-    if (roleError || !["admin", "engineer"].includes(currentUser.role)) {
-      console.error("Unauthorized access");
-      setData([]);
-      setLoading(false);
-      return;
-    }
+      const { data: me } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single()
 
-    let query = supabase
-      .from("users")
-      .select(`
+      if (!me || !["admin", "engineer"].includes(me.role)) {
+        setData([])
+        setLoading(false)
+        return
+      }
+
+      setCurrentRole(me.role)
+
+      let query = supabase.from("users").select(`
         id,
         full_name,
         role,
@@ -103,37 +118,66 @@ React.useEffect(() => {
         phone,
         city,
         avatar_url
-      `);
+      `)
 
-    if (currentUser.role === "engineer") {
-      query = query.in("role", ["user", "engineer"]);
+      if (me.role === "engineer") {
+        query = query.in("role", ["user", "engineer"])
+      }
+
+      const { data } = await query
+
+      if (data) {
+        setData(
+          data.map((u) => ({
+            id: u.id,
+            name: u.full_name ?? "-",
+            role: u.role ?? "user",
+            empId: u.employee_id ?? "-",
+            department: u.department ?? "-",
+            position: u.position ?? "-",
+            email: u.email ?? "-",
+            phone: u.phone ?? "-",
+            location: u.city ?? "-",
+            avatar: u.avatar_url ?? "/images/user/user-31.jpg",
+          }))
+        )
+      }
+
+      setLoading(false)
     }
 
-    const { data, error } = await query;
+    fetchUsers()
+  }, [])
 
-    if (!error && data) {
-      setData(
-        data.map((u) => ({
-          id: u.id,
-          name: u.full_name ?? "-",
-          role: u.role ?? "user",
-          empId: u.employee_id ?? "-",
-          department: u.department ?? "-",
-          position: u.position ?? "-",
-          email: u.email ?? "-",
-          phone: u.phone ?? "-",
-          location: u.city ?? "-",
-          avatar: u.avatar_url ?? "/images/user/user-31.jpg",
-        }))
-      );
+  /* ---------------- DELETE USER ---------------- */
+
+  const handleDeleteUser = async (user: Employee) => {
+    if (user.role === "admin") {
+      toast.error("Admin account cannot be deleted")
+      return
     }
 
-    setLoading(false);
-  };
+    const ok = window.confirm(
+      `Are you sure you want to delete ${user.name}?`
+    )
 
-  fetchUsers();
-}, []);
+    if (!ok) return
 
+    const { error } = await supabase
+      .from("users")
+      .delete()
+      .eq("id", user.id)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+
+    toast.success("User deleted")
+    setData((prev) => prev.filter((u) => u.id !== user.id))
+  }
+
+  /* ---------------- COLUMNS ---------------- */
 
   const columns: ColumnDef<Employee>[] = [
     {
@@ -141,13 +185,17 @@ React.useEffect(() => {
       header: ({ table }) => (
         <Checkbox
           checked={table.getIsAllPageRowsSelected()}
-          onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
+          onCheckedChange={(v) =>
+            table.toggleAllPageRowsSelected(!!v)
+          }
         />
       ),
       cell: ({ row }) => (
         <Checkbox
           checked={row.getIsSelected()}
-          onCheckedChange={(v) => row.toggleSelected(!!v)}
+          onCheckedChange={(v) =>
+            row.toggleSelected(!!v)
+          }
         />
       ),
     },
@@ -170,7 +218,7 @@ React.useEffect(() => {
       header: "Role",
       cell: ({ row }) => (
         <span className="capitalize font-semibold">
-          {row.getValue("role")}
+          {row.original.role}
         </span>
       ),
       filterFn: (row, id, value: string[]) =>
@@ -185,17 +233,67 @@ React.useEffect(() => {
         <Button
           variant="ghost"
           onClick={() =>
-            column.toggleSorting(column.getIsSorted() === "asc")
+            column.toggleSorting(
+              column.getIsSorted() === "asc"
+            )
           }
         >
-          Official Email Address
+          Official Email
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       ),
     },
-    { accessorKey: "phone", header: "Phone No." },
-    { accessorKey: "location", header: "Work Location" },
-  ];
+    { accessorKey: "phone", header: "Phone" },
+    { accessorKey: "location", header: "Location" },
+
+    /* -------- ACTIONS -------- */
+    {
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) => {
+        const user = row.original
+
+        const canEdit =
+          (currentRole === "engineer" &&
+            user.role === "user") ||
+          (currentRole === "admin" &&
+            (user.role === "user" ||
+              user.role === "engineer"))
+
+        return (
+          <div className="flex gap-2">
+            {canEdit && (
+              <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() =>
+                        router.push(`/profile/${user.id}`)
+                        }
+                      >
+                        <Eye className="h-5 w-5" />
+                      </Button>
+
+            )}
+
+            {currentRole === "admin" &&
+              user.role !== "admin" && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    handleDeleteUser(user)
+                  }
+                >
+                  Delete
+                </Button>
+              )}
+          </div>
+        )
+      },
+    },
+  ]
+
+  /* ---------------- TABLE ---------------- */
 
   const table = useReactTable({
     data,
@@ -214,9 +312,11 @@ React.useEffect(() => {
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-  });
+  })
 
-  const roles = ["user", "engineer", "admin"];
+  const roles: Role[] = ["user", "engineer", "admin"]
+
+  /* ---------------- UI ---------------- */
 
   return (
     <div className="w-full">
@@ -224,9 +324,14 @@ React.useEffect(() => {
       <div className="flex items-center gap-2 py-4">
         <Input
           placeholder="Search email..."
-          value={(table.getColumn("email")?.getFilterValue() as string) ?? ""}
+          value={
+            (table.getColumn("email")?.getFilterValue() as string) ??
+            ""
+          }
           onChange={(e) =>
-            table.getColumn("email")?.setFilterValue(e.target.value)
+            table
+              .getColumn("email")
+              ?.setFilterValue(e.target.value)
           }
           className="max-w-sm"
         />
@@ -244,15 +349,17 @@ React.useEffect(() => {
                 )?.includes(role)}
                 onCheckedChange={(checked) => {
                   const prev =
-                    (table.getColumn("role")?.getFilterValue() as string[]) ??
-                    [];
+                    (table.getColumn("role")?.getFilterValue() as
+                      | string[]
+                      | undefined) ?? []
+
                   table
                     .getColumn("role")
                     ?.setFilterValue(
                       checked
                         ? [...prev, role]
                         : prev.filter((r) => r !== role)
-                    );
+                    )
                 }}
               >
                 {role}
@@ -344,7 +451,7 @@ React.useEffect(() => {
       <div className="flex items-center justify-end space-x-2 py-4">
         <div className="text-muted-foreground flex-1 text-sm">
           {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
+          {table.getFilteredRowModel().rows.length} selected
         </div>
         <div className="space-x-2">
           <Button
@@ -366,5 +473,5 @@ React.useEffect(() => {
         </div>
       </div>
     </div>
-  );
+  )
 }

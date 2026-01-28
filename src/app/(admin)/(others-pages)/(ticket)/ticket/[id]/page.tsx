@@ -19,6 +19,8 @@ import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
 /* -----------------------------------
    Types
 ----------------------------------- */
+type Role = "user" | "engineer" | "admin";
+
 type TicketStatus =
   | "new"
   | "open"
@@ -56,7 +58,7 @@ type ChatProfile = {
 };
 
 /* -----------------------------------
-   Status Mapper (CRITICAL FIX)
+   Status Mapper
 ----------------------------------- */
 function mapTicketStatusToActivity(
   status: TicketStatus
@@ -82,13 +84,14 @@ export default function TicketDetailsPage() {
   const [ticket, setTicket] = React.useState<Ticket | null>(null);
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [userId, setUserId] = React.useState<string | null>(null);
+  const [role, setRole] = React.useState<Role | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const [closeOpen, setCloseOpen] = React.useState(false);
   const [holdOpen, setHoldOpen] = React.useState(false);
 
   /* -----------------------------------
-     Load Ticket + Messages
+     Load Ticket + Messages + Role
   ----------------------------------- */
   React.useEffect(() => {
     const loadData = async () => {
@@ -100,29 +103,34 @@ export default function TicketDetailsPage() {
 
       setUserId(user.id);
 
-      const [{ data: ticketData }, { data: chatData }] =
-        await Promise.all([
-          supabase
-            .from("tickets")
-            .select("*")
-            .eq("id", id)
-            .single(),
-          supabase
-            .from("ticket_messages")
-            .select("*")
-            .eq("ticket_id", id)
-            .order("created_at"),
-        ]);
+      const [
+        { data: ticketData },
+        { data: chatData },
+        { data: roleData },
+      ] = await Promise.all([
+        supabase.from("tickets").select("*").eq("id", id).single(),
+        supabase
+          .from("ticket_messages")
+          .select("*")
+          .eq("ticket_id", id)
+          .order("created_at"),
+        supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .single(),
+      ]);
 
       setTicket(ticketData);
       setMessages(chatData ?? []);
+      setRole(roleData?.role ?? "user");
       setLoading(false);
     };
 
     loadData();
   }, [id]);
 
-  if (loading || !ticket || !userId) {
+  if (loading || !ticket || !userId || !role) {
     return (
       <div className="p-6">
         <Skeleton className="h-6 w-40 mb-4" />
@@ -135,7 +143,7 @@ export default function TicketDetailsPage() {
     id: userId,
     name: ticket.requester_name,
     avatar_url: null,
-    role: "user",
+    role: role === "engineer" ? "engineer" : "user",
   };
 
   const engineerProfile: ChatProfile = {
@@ -146,46 +154,47 @@ export default function TicketDetailsPage() {
   };
 
   /* -----------------------------------
-     Activity Trail (FIXED & SAFE)
+     Activity Trail
   ----------------------------------- */
-  const activityItems: ActivityItem[] = [
-    {
-      label: "Ticket Created",
-      date: new Date(ticket.created_at).toDateString(),
-      status: "done",
-    },
-    {
-      label: "Ticket Assigned",
-      date: new Date(ticket.created_at).toDateString(),
-      status: ticket.assignee ? "done" : "pending",
-    },
-    {
-      label: "Engineer Working",
-      status: mapTicketStatusToActivity(ticket.status),
-    },
-...(ticket.status === "hold"
-  ? ([
-      {
-        label: "Ticket On Hold",
-        date: new Date().toDateString(),
-        status: "hold",
-        comment: ticket.hold_comment ?? null,
-      },
-    ] satisfies ActivityItem[])
-  : []),
+const activityItems: ActivityItem[] = [
+  {
+    label: "Ticket Created",
+    date: new Date(ticket.created_at).toDateString(),
+    status: "done",
+  },
+  {
+    label: "Ticket Assigned",
+    date: new Date(ticket.created_at).toDateString(),
+    status: ticket.assignee ? "done" : "pending",
+  },
+  {
+    label: "Engineer Working",
+    status: mapTicketStatusToActivity(ticket.status),
+  },
 
-...(ticket.status === "closed"
-  ? ([
-      {
-        label: "Ticket Closed",
-        date: new Date().toDateString(),
-        status: "closed",
-        comment: ticket.closed_comment ?? null,
-      },
-    ] satisfies ActivityItem[])
-  : []),
+  ...(ticket.status === "hold"
+    ? ([
+        {
+          label: "Ticket On Hold",
+          date: new Date().toDateString(),
+          status: "hold",
+          comment: ticket.hold_comment ?? null,
+        },
+      ] satisfies ActivityItem[])
+    : []),
 
-  ];
+  ...(ticket.status === "closed"
+    ? ([
+        {
+          label: "Ticket Closed",
+          date: new Date().toDateString(),
+          status: "closed",
+          comment: ticket.closed_comment ?? null,
+        },
+      ] satisfies ActivityItem[])
+    : []),
+];
+
 
   return (
     <div className="p-6 space-y-6">
@@ -194,9 +203,7 @@ export default function TicketDetailsPage() {
         <Button variant="ghost" onClick={() => router.back()}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
-        <h2 className="text-xl font-semibold">
-          Ticket Details
-        </h2>
+        <h2 className="text-xl font-semibold">Ticket Details</h2>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -221,14 +228,13 @@ export default function TicketDetailsPage() {
             currentUser={currentUserProfile}
             otherUser={engineerProfile}
             onSend={async (text) => {
-              await supabase
-                .from("ticket_messages")
-                .insert({
-                  ticket_id: id,
-                  sender_id: userId,
-                  sender_role: "user",
-                  message: text,
-                });
+              await supabase.from("ticket_messages").insert({
+                ticket_id: id,
+                sender_id: userId,
+                sender_role:
+                  role === "engineer" ? "engineer" : "user",
+                message: text,
+              });
             }}
           />
         </Card>
@@ -239,25 +245,24 @@ export default function TicketDetailsPage() {
 
           <TicketActivityTrail items={activityItems} />
 
-          {engineerProfile.role === "engineer" &&
-            ticket.status !== "closed" && (
-              <div className="space-y-3">
-                <Button
-                  className="w-full"
-                  onClick={() => setCloseOpen(true)}
-                >
-                  Close Ticket
-                </Button>
+          {role === "engineer" && ticket.status !== "closed" && (
+            <div className="space-y-3">
+              <Button
+                className="w-full"
+                onClick={() => setCloseOpen(true)}
+              >
+                Close Ticket
+              </Button>
 
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setHoldOpen(true)}
-                >
-                  Hold Ticket
-                </Button>
-              </div>
-            )}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setHoldOpen(true)}
+              >
+                Hold Ticket
+              </Button>
+            </div>
+          )}
         </Card>
 
         {/* Close Dialog */}
@@ -266,6 +271,8 @@ export default function TicketDetailsPage() {
           onClose={() => setCloseOpen(false)}
           title="Close Ticket Comment"
           onSubmit={async (comment) => {
+            if (role !== "engineer") return;
+
             await supabase
               .from("tickets")
               .update({
@@ -288,6 +295,8 @@ export default function TicketDetailsPage() {
           onClose={() => setHoldOpen(false)}
           title="Hold Ticket Comment"
           onSubmit={async (comment) => {
+            if (role !== "engineer") return;
+
             await supabase
               .from("tickets")
               .update({

@@ -10,6 +10,8 @@ import TicketOverviewCards from "@/components/tickets/TicketOverviewCards";
 import UserLatestTickets from "@/components/tickets/UserLatestTickets";
 import RoleBasedTickets from "@/components/user-role/RoleBasedTickets";
 import TeammatesCard from "@/components/user-role/TeammatesCard";
+import { PieChartTable } from "@/components/user-role/PieChartTable";
+
 
 export const metadata: Metadata = {
   title:
@@ -29,7 +31,8 @@ export default function Ecommerce() {
         <TeammatesCard />
       </div>
       <div className="col-span-12 xl:col-span-7">
-           <TeammatesCard />
+           {/* <TeammatesCard /> */}
+          <PieChartTable />
       </div>
       <div className="col-span-12">
         <RoleBasedTickets />
@@ -56,9 +59,9 @@ export default function Ecommerce() {
         <DemographicCard />
       </div> */}
 
-      <div className="col-span-12 xl:col-span-7">
+      {/* <div className="col-span-12 xl:col-span-7">
  <DemographicCard />
-      </div>
+      </div> */}
     </div>
     </>
   );
