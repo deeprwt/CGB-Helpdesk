@@ -19,35 +19,63 @@ export default function SignInForm() {
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const router = useRouter()
+  const [forgotOpen, setForgotOpen] = React.useState(false)
+  const [forgotEmail, setForgotEmail] = React.useState("")
+  const [forgotLoading, setForgotLoading] = React.useState(false)
 
+  async function handleForgotPassword() {
+    if (!forgotEmail) {
+      toast.error("Please enter your email")
+      return
+    }
 
-async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-  e.preventDefault()
-  setLoading(true)
-  setError(null)
+    setForgotLoading(true)
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: `${window.location.origin}/update-password`,
+    })
 
-  if (error) {
-    setError(error.message)
-    setLoading(false)
-    return
+    setForgotLoading(false)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+
+    toast.success("Password reset link sent to your email")
+    setForgotOpen(false)
+    setForgotEmail("")
   }
 
-  // ✅ Stop loading BEFORE redirect
-  setLoading(false)
 
-  // ✅ HARD redirect (bypasses middleware race)
-toast.success("Login Successfully")
 
-setTimeout(() => {
-  window.location.href = "/"
-}, 800)
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
 
-}
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (error) {
+      setError(error.message)
+      setLoading(false)
+      return
+    }
+
+    // ✅ Stop loading BEFORE redirect
+    setLoading(false)
+
+    // ✅ HARD redirect (bypasses middleware race)
+    toast.success("Login Successfully")
+
+    setTimeout(() => {
+      window.location.href = "/"
+    }, 800)
+
+  }
 
 
   async function signInWithGoogle() {
@@ -75,7 +103,7 @@ setTimeout(() => {
             Enter your email and password to sign in!
           </p>
         </div>
-
+{/* 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
           <Button variant="secondary" className="gap-3 py-3" onClick={signInWithGoogle}>
             Sign in with Google
@@ -94,7 +122,7 @@ setTimeout(() => {
               Or
             </span>
           </div>
-        </div>
+        </div> */}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -134,12 +162,13 @@ setTimeout(() => {
                 Keep me logged in
               </span>
             </div>
-            <Link
-              href="/reset-password"
-              className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
+            <Button
+              type="button"
+              onClick={() => setForgotOpen(true)}
+              variant="link"
             >
               Forgot password?
-            </Link>
+            </Button>
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
@@ -158,6 +187,43 @@ setTimeout(() => {
           </p>
         </div>
       </div>
+      {forgotOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md p-6 bg-white rounded-lg dark:bg-gray-900">
+            <h2 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white">
+              Reset Password
+            </h2>
+            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+              Enter your email and we’ll send you a reset link.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  placeholder="info@gmail.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="secondary"
+                  onClick={() => setForgotOpen(false)}
+                  disabled={forgotLoading}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleForgotPassword} disabled={forgotLoading}>
+                  {forgotLoading ? "Sending..." : "Send Link"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -80,7 +80,7 @@ export default function SignUpForm() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
+        {/* <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
           <Button variant="secondary" className="py-3" onClick={signUpWithGoogle}>
             Sign up with Google
           </Button>
@@ -89,7 +89,7 @@ export default function SignUpForm() {
           </Button>
         </div>
 
-                <div className="relative py-3 sm:py-5">
+        <div className="relative py-3 sm:py-5">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-gray-200 dark:border-gray-800" />
           </div>
@@ -98,7 +98,7 @@ export default function SignUpForm() {
               Or
             </span>
           </div>
-        </div>
+        </div> */}
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
