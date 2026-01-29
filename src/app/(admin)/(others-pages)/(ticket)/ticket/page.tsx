@@ -5,7 +5,7 @@ import React from "react";
 
 export const metadata: Metadata = {
   title: "Tickets | Help Desk 360° CGB Solutions ",
-  description: "Tickets",
+  description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
 export default function BlankPage() {

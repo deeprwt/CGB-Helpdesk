@@ -15,8 +15,8 @@ import { PieChartTable } from "@/components/user-role/PieChartTable";
 
 export const metadata: Metadata = {
   title:
-    "Next.js E-commerce Dashboard | Help Desk 360° CGB Solutions ",
-  description: "This is Next.js Home for TailAdmin Dashboard Template",
+    "Dashboard | Help Desk 360° CGB Solutions ",
+  description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
 export default function Ecommerce() {

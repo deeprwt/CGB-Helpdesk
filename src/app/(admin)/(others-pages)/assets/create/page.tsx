@@ -5,8 +5,8 @@ import { Metadata } from "next";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Next.js Blank Page | Help Desk 360° CGB Solutions ",
-  description: "This is Next.js Blank Page TailAdmin Dashboard Template",
+  title: "Create Assets | Help Desk 360° CGB Solutions ",
+  description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
 export default function BlankPage() {

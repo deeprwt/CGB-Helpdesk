@@ -2,8 +2,8 @@ import SignInForm from "@/components/auth/SignInForm";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Next.js SignIn Page | Help Desk 360° CGB Solutions ",
-  description: "This is Next.js Signin Page TailAdmin Dashboard Template",
+  title: "SignIn Page | Help Desk 360° CGB Solutions ",
+  description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
 export default function SignIn() {
