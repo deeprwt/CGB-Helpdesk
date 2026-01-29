@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
-const PUBLIC_ROUTES = ["/signin", "/signup", "/reset-password"]
+const PUBLIC_ROUTES = ["/signin", "/signup", "/reset-password", "/update-password"]
 
 export default function AuthGate({
   children,
