@@ -9,9 +9,8 @@ export async function POST(req: Request) {
        1️⃣ Validate Authorization header
     ----------------------------------- */
     const authHeader =
-  req.headers.get("authorization") ??
-  req.headers.get("Authorization")
-
+      req.headers.get("authorization") ??
+      req.headers.get("Authorization")
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -63,28 +62,31 @@ export async function POST(req: Request) {
     const formData = await req.formData()
     const files = formData.getAll("attachments") as File[]
 
+    const requesterId = formData.get("requester_id")?.toString()
+    if (!requesterId) {
+      return NextResponse.json(
+        { error: "Requester is required" },
+        { status: 400 }
+      )
+    }
+
     /* -----------------------------------
        5️⃣ Insert ticket
     ----------------------------------- */
     const { data: ticket, error: ticketError } = await supabaseAdmin
       .from("tickets")
       .insert({
-        requester_id: user.id,
-        requester_name: formData.get("requester_name")?.toString() ?? null,
+        requester_id: requesterId,
+        requester_name: formData.get("requester_name")?.toString() ?? "",
         contact: formData.get("contact")?.toString() ?? null,
-        subject: formData.get("subject")?.toString() ?? null,
+        subject: formData.get("subject")?.toString() ?? "",
         description: formData.get("description")?.toString() ?? null,
         category: formData.get("category")?.toString() ?? null,
         sub_category: formData.get("sub_category")?.toString() ?? null,
         priority: formData.get("priority")?.toString() ?? null,
         status: "new",
-        urgency: formData.get("urgency")?.toString() ?? null,
-        impact: formData.get("impact")?.toString() ?? null,
-        // assignee: formData.get("assignee")?.toString() ?? null,
         location: formData.get("location")?.toString() ?? null,
-        inventory: formData.get("inventory")?.toString() ?? null,
         link: formData.get("link")?.toString() ?? null,
-        cc: formData.get("cc")?.toString() ?? null,
       })
       .select()
       .single()
@@ -94,48 +96,56 @@ export async function POST(req: Request) {
     }
 
     /* -----------------------------------
-       6️⃣ Upload attachments
+       6️⃣ Link asset (if provided)
     ----------------------------------- */
-for (const file of files) {
-  if (
-    typeof file !== "object" ||
-    !("arrayBuffer" in file) ||
-    !("size" in file) ||
-    file.size === 0
-  ) {
-    continue
-  }
+    const assetId = formData.get("asset_id")?.toString()
 
-  const arrayBuffer = await file.arrayBuffer()
-  const buffer = Buffer.from(arrayBuffer)
+    if (assetId) {
+      const { error: assetLinkError } = await supabaseAdmin
+        .from("asset_tickets")
+        .insert({
+          ticket_id: ticket.id,
+          asset_id: assetId,
+        })
 
-  const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
-
-  const { error: uploadError } = await supabaseAdmin.storage
-    .from("ticket-attachments")
-    .upload(filePath, buffer, {
-      contentType: file.type,
-      upsert: false,
-    })
-
-  if (uploadError) throw uploadError
-
-  const { error: attachmentError } = await supabaseAdmin
-    .from("ticket_attachments")
-    .insert({
-      ticket_id: ticket.id,
-      file_name: file.name,
-      file_path: filePath,
-      file_type: file.type,
-      file_size: file.size,
-    })
-
-  if (attachmentError) throw attachmentError
-}
-
+      if (assetLinkError) {
+        throw assetLinkError
+      }
+    }
 
     /* -----------------------------------
-       7️⃣ Success response
+       7️⃣ Upload attachments
+    ----------------------------------- */
+    for (const file of files) {
+      if (!file || file.size === 0) continue
+
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
+
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from("ticket-attachments")
+        .upload(filePath, buffer, {
+          contentType: file.type,
+          upsert: false,
+        })
+
+      if (uploadError) throw uploadError
+
+      const { error: attachmentError } = await supabaseAdmin
+        .from("ticket_attachments")
+        .insert({
+          ticket_id: ticket.id,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+        })
+
+      if (attachmentError) throw attachmentError
+    }
+
+    /* -----------------------------------
+       8️⃣ Success
     ----------------------------------- */
     return NextResponse.json({
       success: true,
