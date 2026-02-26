@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain } from "@/lib/org"
 import { useRouter } from "next/navigation"
 
 import { Card } from "@/components/ui/card"
@@ -115,9 +116,16 @@ export default function AssetForm({
 
   React.useEffect(() => {
     const loadUsers = async () => {
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser()
+
+      const domain = extractOrgDomain(currentUser?.email ?? "")
+
       const { data } = await supabase
         .from("users")
         .select("id, email")
+        .ilike("email", `%@${domain}`)
         .order("email")
 
       setUsers(data ?? [])
@@ -127,12 +135,11 @@ export default function AssetForm({
   }, [])
 
   /* ---------------- SAVE ASSIGNMENT ---------------- */
-  const saveAssignment = async (finalAssetId: string) => {
+  const saveAssignment = async (
+    finalAssetId: string,
+    assignedBy: string | null
+  ) => {
     if (!selectedUser) return
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
 
     await supabase
       .from("asset_assignments")
@@ -142,7 +149,7 @@ export default function AssetForm({
     await supabase.from("asset_assignments").insert({
       asset_id: finalAssetId,
       user_id: selectedUser.id,
-      assigned_by: user?.id ?? null,
+      assigned_by: assignedBy,
     })
   }
 
@@ -156,6 +163,10 @@ export default function AssetForm({
 
     setLoading(true)
     let assetIdFinal = assetId
+
+    const {
+      data: { user: currentUser },
+    } = await supabase.auth.getUser()
 
     if (mode === "create") {
       const { data: asset, error } = await supabase
@@ -231,7 +242,7 @@ export default function AssetForm({
       await supabase.from("asset_details").insert(detailRows)
     }
 
-    await saveAssignment(assetIdFinal!)
+    await saveAssignment(assetIdFinal!, currentUser?.id ?? null)
 
     toast.success(
       mode === "create" ? "Asset created" : "Asset updated"

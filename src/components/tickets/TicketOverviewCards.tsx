@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TrendingUp } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
 
 type Role = "user" | "engineer" | "admin"
 
@@ -39,7 +40,7 @@ export default function TicketOverviewCards() {
       const role = (roleData?.role ?? "user") as Role
 
       /* ----------------------------
-         USER STATS
+         USER STATS — scoped to this user's own tickets only
       ---------------------------- */
       if (role === "user") {
         const [total, newTickets, openTickets, holdTickets, closedTickets] =
@@ -67,7 +68,6 @@ export default function TicketOverviewCards() {
               .eq("requester_id", user.id)
               .eq("status", "hold"),
 
-
             supabase
               .from("tickets")
               .select("id", { count: "exact", head: true })
@@ -85,9 +85,24 @@ export default function TicketOverviewCards() {
       }
 
       /* ----------------------------
-         ENGINEER STATS
+         ENGINEER / ADMIN STATS — scoped to this org only
       ---------------------------- */
-      if (role === "engineer") {
+      if (role === "engineer" || role === "admin") {
+        const domain = extractOrgDomain(user.email ?? "")
+        const orgUserIds = await getOrgUserIds(supabase, domain)
+
+        if (orgUserIds.length === 0) {
+          setStats([
+            { label: "Total Tickets", value: 0 },
+            { label: "New in Queue", value: 0 },
+            { label: "Open (Assigned)", value: 0 },
+            { label: "Hold Tickets", value: 0 },
+            { label: "Closed (Resolved)", value: 0 },
+          ])
+          setLoading(false)
+          return
+        }
+
         const [
           total,
           queueNew,
@@ -95,33 +110,35 @@ export default function TicketOverviewCards() {
           hold,
           closedAssigned,
         ] = await Promise.all([
-          // Total tickets visible to engineer
-          supabase
-            .from("tickets")
-            .select("id", { count: "exact", head: true }),
-
-          // New tickets in queue (unassigned)
+          // All tickets raised by anyone in this org
           supabase
             .from("tickets")
             .select("id", { count: "exact", head: true })
+            .in("requester_id", orgUserIds),
+
+          // New unassigned tickets from this org
+          supabase
+            .from("tickets")
+            .select("id", { count: "exact", head: true })
+            .in("requester_id", orgUserIds)
             .is("assignee", null)
             .eq("status", "new"),
 
-          // Open tickets assigned to engineer
+          // Open tickets assigned to this engineer
           supabase
             .from("tickets")
             .select("id", { count: "exact", head: true })
             .eq("assignee", user.id)
             .eq("status", "open"),
 
-          // Hold tickets assigned to engineer
+          // Hold tickets assigned to this engineer
           supabase
             .from("tickets")
             .select("id", { count: "exact", head: true })
             .eq("assignee", user.id)
             .eq("status", "hold"),
 
-          // Closed tickets handled by engineer
+          // Closed tickets resolved by this engineer
           supabase
             .from("tickets")
             .select("id", { count: "exact", head: true })
@@ -138,8 +155,6 @@ export default function TicketOverviewCards() {
         ])
       }
 
-
-      // admin → intentionally empty for now
       setLoading(false)
     }
 

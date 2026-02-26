@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Pie, PieChart } from "recharts"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
 
 import {
   Card,
@@ -116,6 +117,23 @@ export function PieChartTable() {
 
       const fromDate = getFromDate(range)
 
+      // Scope aggregate counts to this org only
+      const domain = extractOrgDomain(user.email ?? "")
+      const orgUserIds = await getOrgUserIds(supabase, domain)
+
+      if (orgUserIds.length === 0) {
+        setData([
+          { key: "total", label: "Total Tickets", value: 0, fill: COLORS.total },
+          { key: "new", label: "New Tickets (Queue)", value: 0, fill: COLORS.new },
+          { key: "open", label: "Open Tickets", value: 0, fill: COLORS.open },
+          { key: "hold", label: "Hold Tickets", value: 0, fill: COLORS.hold },
+          { key: "closed", label: "Closed Tickets", value: 0, fill: COLORS.closed },
+        ])
+        setLoading(false)
+        setReady(true)
+        return
+      }
+
       const [
         total,
         newQueue,
@@ -126,11 +144,13 @@ export function PieChartTable() {
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
+          .in("requester_id", orgUserIds)
           .gte("created_at", fromDate),
 
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
+          .in("requester_id", orgUserIds)
           .is("assignee", null)
           .eq("status", "new")
           .gte("created_at", fromDate),

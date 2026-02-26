@@ -24,85 +24,110 @@ type Props = {
   items: ActivityItem[];
 };
 
+/* -----------------------------------
+   Component
+----------------------------------- */
 export default function TicketActivityTrail({ items }: Props) {
   return (
-    <div className="space-y-6">
+    <ol className="space-y-0">
       {items.map((item, index) => {
-        const isDone =
-          item.status === "done" || item.status === "closed";
+        const isLast = index === items.length - 1;
+        const isDone = item.status === "done" || item.status === "closed";
         const isProcessing = item.status === "processing";
+        const isHold = item.status === "hold";
+        const isPending = item.status === "pending";
+
+        /* Line below this step is green when this step is completed */
+        const lineGreen = isDone;
 
         return (
-          <div key={index} className="flex gap-4">
-            {/* LEFT ICON + LINE */}
+          <li key={index} className="relative flex gap-3">
+            {/* ── Left: circle + connector line ─── */}
             <div className="flex flex-col items-center">
-              {/* CIRCLE */}
+
+              {/* Circle */}
               <div
                 className={cn(
-                  "h-6 w-6 rounded-full flex items-center justify-center border",
-                  isDone &&
-                    "bg-green-500 border-green-500 text-white",
-                  isProcessing &&
-                    "border-green-500 bg-white relative",
-                  item.status === "pending" &&
-                    "border-muted-foreground bg-background",
-                  item.status === "hold" &&
-                    "bg-orange-500 border-orange-500 text-white"
+                  "relative z-10 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full",
+                  isDone && "bg-green-500",
+                  isProcessing && "bg-green-500",
+                  isHold && "bg-orange-400",
+                  isPending && "border-2 border-muted-foreground/30 bg-background"
                 )}
               >
-                {isDone && <Check className="h-4 w-4" />}
+                {/* Checkmark for done/closed */}
+                {isDone && (
+                  <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                )}
 
+                {/* Solid inner dot for processing */}
                 {isProcessing && (
-                  <span className="absolute h-2.5 w-2.5 rounded-full bg-green-500 animate-ping" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-white" />
                 )}
               </div>
 
-              {/* VERTICAL LINE */}
-              {index !== items.length - 1 && (
+              {/* Vertical connector line */}
+              {!isLast && (
                 <div
                   className={cn(
-                    "w-px flex-1 mt-1",
-                    isDone || isProcessing
+                    "w-px flex-1 my-1",
+                    lineGreen
                       ? "bg-green-500"
-                      : "bg-muted-foreground/40"
+                      : "bg-muted-foreground/20"
                   )}
+                  style={{ minHeight: "40px" }}
                 />
               )}
             </div>
 
-            {/* RIGHT CONTENT */}
-            <div className="flex-1 space-y-1">
-              <p className="text-sm font-medium">{item.label}</p>
-
-              {item.status === "processing" && (
-                <p className="text-xs text-green-600">
-                  Processing…
-                </p>
+            {/* ── Right: label + date + comment ─── */}
+            <div
+              className={cn(
+                "flex-1 min-w-0",
+                isLast ? "pb-0" : "pb-1"
               )}
+            >
+              <p
+                className={cn(
+                  "text-sm font-semibold leading-none pt-0.5",
+                  isPending
+                    ? "text-muted-foreground"
+                    : "text-foreground"
+                )}
+              >
+                {item.label}
+              </p>
 
               {item.date && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground mt-1">
                   {item.date}
                 </p>
               )}
 
+              {isProcessing && !item.date && (
+                <p className="text-xs text-green-600 mt-1 font-medium">
+                  In progress…
+                </p>
+              )}
+
               {item.comment && (
-                <div
+                <p
                   className={cn(
-                    "mt-2 rounded-md px-3 py-2 text-xs",
-                    item.status === "closed" &&
-                      "bg-green-50 text-green-700",
-                    item.status === "hold" &&
-                      "bg-orange-50 text-orange-700"
+                    "mt-2 text-xs rounded-md px-2.5 py-1.5 leading-relaxed",
+                    isDone
+                      ? "bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300"
+                      : isHold
+                      ? "bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-300"
+                      : "bg-muted text-muted-foreground"
                   )}
                 >
                   {item.comment}
-                </div>
+                </p>
               )}
             </div>
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }

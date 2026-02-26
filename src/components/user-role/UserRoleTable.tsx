@@ -4,6 +4,7 @@ import * as React from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain } from "@/lib/org"
 
 import {
   ColumnDef,
@@ -107,6 +108,9 @@ export default function EmployeeTable() {
 
       setCurrentRole(me.role)
 
+      // Scope to current user's org domain
+      const domain = extractOrgDomain(session.user.email ?? "")
+
       let query = supabase.from("users").select(`
         id,
         full_name,
@@ -119,6 +123,7 @@ export default function EmployeeTable() {
         city,
         avatar_url
       `)
+        .ilike("email", `%@${domain}`)
 
       if (me.role === "engineer") {
         query = query.in("role", ["user", "engineer"])

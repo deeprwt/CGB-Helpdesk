@@ -3,6 +3,7 @@
 import * as React from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain } from "@/lib/org"
 import { useRouter } from "next/navigation"
 
 import {
@@ -73,6 +74,12 @@ export default function AssetsPage() {
   const loadAssets = async () => {
     setLoading(true)
 
+    const {
+      data: { user: currentUser },
+    } = await supabase.auth.getUser()
+
+    const domain = extractOrgDomain(currentUser?.email ?? "")
+
     const [{ data: assets }, { data: assignments }, { data: users }] =
       await Promise.all([
         supabase
@@ -84,7 +91,11 @@ export default function AssetsPage() {
           .from("asset_assignments")
           .select("asset_id, user_id"),
 
-        supabase.from("users").select("id, email"),
+        // Only look up users within this org for the assignment email display
+        supabase
+          .from("users")
+          .select("id, email")
+          .ilike("email", `%@${domain}`),
       ])
 
     const userMap = new Map(

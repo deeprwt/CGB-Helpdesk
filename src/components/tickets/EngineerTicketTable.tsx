@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
 import {
   Table,
   TableBody,
@@ -19,6 +20,7 @@ import { Eye } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { timeAgo, STATUS_STYLE } from "@/lib/ticket-utils"
+import { sendNotification } from "@/lib/notify"
 
 const PAGE_SIZE = 50
 
@@ -26,6 +28,7 @@ type Ticket = {
   id: string
   subject: string
   location: string | null
+  requester_id: string
   requester_name: string
   created_at: string
   status: string
@@ -64,8 +67,19 @@ export default function EngineerTicketTable() {
       .range(from, to)
 
     if (tab === "queue") {
-      query = query.is("assignee", null)
+      // Queue: unassigned tickets scoped to this engineer's org
+      const domain = extractOrgDomain(user.email ?? "")
+      const orgUserIds = await getOrgUserIds(supabase, domain)
+
+      if (orgUserIds.length === 0) {
+        setTickets([])
+        setHasNext(false)
+        return
+      }
+
+      query = query.is("assignee", null).in("requester_id", orgUserIds)
     } else {
+      // My tasks: tickets assigned to this specific engineer
       query = query.eq("assignee", user.id)
     }
 
@@ -101,7 +115,7 @@ export default function EngineerTicketTable() {
     }
   }, [tab, search, status, category, page])
 
-  const acquireTicket = async (ticketId: string) => {
+  const acquireTicket = async (ticketId: string, requesterId: string) => {
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -122,6 +136,16 @@ export default function EngineerTicketTable() {
       toast.error("Ticket already acquired")
     } else {
       toast.success("Ticket acquired")
+
+      /* Notify the user who raised the ticket */
+      await sendNotification({
+        user_id: requesterId,
+        actor_id: user.id,
+        ticket_id: ticketId,
+        type: "acquired",
+        message: `acquired your ticket #${ticketId.slice(0, 8).toUpperCase()}`,
+      })
+
       loadTickets()
     }
   }
@@ -194,7 +218,7 @@ export default function EngineerTicketTable() {
 
               <TableCell className="text-right">
                 {tab === "queue" ? (
-                  <Button size="sm" onClick={() => acquireTicket(t.id)}>
+                  <Button size="sm" onClick={() => acquireTicket(t.id, t.requester_id)}>
                     Acquire
                   </Button>
                 ) : (

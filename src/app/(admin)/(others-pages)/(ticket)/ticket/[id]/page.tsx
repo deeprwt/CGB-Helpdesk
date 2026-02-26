@@ -15,6 +15,7 @@ import TicketActivityTrail, {
   ActivityStatus,
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
+import { sendNotification } from "@/lib/notify";
 
 /* -----------------------------------
    Types
@@ -34,8 +35,10 @@ type Ticket = {
   description: string | null;
   status: TicketStatus;
   priority: "low" | "medium" | "high";
+  requester_id: string;
   requester_name: string;
   assignee: string | null;
+  assigned_at: string | null;
   created_at: string;
   link: string | null;
   closed_comment?: string | null;
@@ -58,25 +61,31 @@ type ChatProfile = {
 };
 
 /* -----------------------------------
-   Status Mapper
+   Helpers
 ----------------------------------- */
-function mapTicketStatusToActivity(
-  status: TicketStatus
-): ActivityStatus {
+function mapTicketStatusToActivity(status: TicketStatus): ActivityStatus {
   switch (status) {
-    case "in_progress":
-      return "processing";
-    case "hold":
-      return "hold";
-    case "closed":
-      return "closed";
+    case "in_progress": return "processing";
+    case "hold":        return "hold";
+    case "closed":      return "closed";
     case "open":
     case "new":
-    default:
-      return "pending";
+    default:            return "pending";
   }
 }
 
+function fmtDate(d: Date) {
+  return d.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/* -----------------------------------
+   Page
+----------------------------------- */
 export default function TicketDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -90,15 +99,10 @@ export default function TicketDetailsPage() {
   const [closeOpen, setCloseOpen] = React.useState(false);
   const [holdOpen, setHoldOpen] = React.useState(false);
 
-  /* -----------------------------------
-     Load Ticket + Messages + Role
-  ----------------------------------- */
+  /* ── Load Ticket + Messages + Role ── */
   React.useEffect(() => {
     const loadData = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       setUserId(user.id);
@@ -153,48 +157,43 @@ export default function TicketDetailsPage() {
     role: "engineer",
   };
 
-  /* -----------------------------------
-     Activity Trail
-  ----------------------------------- */
-const activityItems: ActivityItem[] = [
-  {
-    label: "Ticket Created",
-    date: new Date(ticket.created_at).toDateString(),
-    status: "done",
-  },
-  {
-    label: "Ticket Assigned",
-    date: new Date(ticket.created_at).toDateString(),
-    status: ticket.assignee ? "done" : "pending",
-  },
-  {
-    label: "Engineer Working",
-    status: mapTicketStatusToActivity(ticket.status),
-  },
+  /* ── Activity Trail ─────────────── */
+  const activityItems: ActivityItem[] = [
+    {
+      label: "Ticket Created",
+      date: fmtDate(new Date(ticket.created_at)),
+      status: "done",
+    },
+    {
+      label: "Ticket Acquired",
+      date: ticket.assigned_at
+        ? fmtDate(new Date(ticket.assigned_at))
+        : undefined,
+      status: ticket.assignee ? "done" : "pending",
+    },
+    {
+      label: "Engineer is working on ticket",
+      status: mapTicketStatusToActivity(ticket.status),
+    },
 
-  ...(ticket.status === "hold"
-    ? ([
-        {
+    ...(ticket.status === "hold"
+      ? ([{
           label: "Ticket On Hold",
-          date: new Date().toDateString(),
+          date: fmtDate(new Date()),
           status: "hold",
           comment: ticket.hold_comment ?? null,
-        },
-      ] satisfies ActivityItem[])
-    : []),
+        }] satisfies ActivityItem[])
+      : []),
 
-  ...(ticket.status === "closed"
-    ? ([
-        {
+    ...(ticket.status === "closed"
+      ? ([{
           label: "Ticket Closed",
-          date: new Date().toDateString(),
+          date: fmtDate(new Date()),
           status: "closed",
           comment: ticket.closed_comment ?? null,
-        },
-      ] satisfies ActivityItem[])
-    : []),
-];
-
+        }] satisfies ActivityItem[])
+      : []),
+  ];
 
   return (
     <div className="p-6 space-y-6">
@@ -215,24 +214,25 @@ const activityItems: ActivityItem[] = [
           requesterName={ticket.requester_name}
           assigneeText={ticket.assignee}
           createdAt={ticket.created_at}
+          assignedAt={ticket.assigned_at}
           attachments={[]}
           link={ticket.link}
         />
 
         {/* CENTER */}
-        <Card className="p-5">
+        <Card className="p-5 flex flex-col h-[680px]">
           <TicketChat
             ticketId={id}
             messages={messages}
             setMessages={setMessages}
             currentUser={currentUserProfile}
             otherUser={engineerProfile}
+            activityItems={activityItems}
             onSend={async (text) => {
               await supabase.from("ticket_messages").insert({
                 ticket_id: id,
                 sender_id: userId,
-                sender_role:
-                  role === "engineer" ? "engineer" : "user",
+                sender_role: role === "engineer" ? "engineer" : "user",
                 message: text,
               });
             }}
@@ -240,20 +240,27 @@ const activityItems: ActivityItem[] = [
         </Card>
 
         {/* RIGHT */}
-        <Card className="p-5 space-y-6">
-          <h3 className="font-semibold">Activity Log</h3>
+        <Card className="p-5 space-y-5">
+          <h3 className="text-lg font-bold">Activity Log</h3>
+
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              Ticket ID
+            </p>
+            <p className="text-xl font-extrabold tracking-tight">
+              {`PN${ticket.id.replace(/-/g, "").slice(0, 7).toUpperCase()}`}
+            </p>
+          </div>
+
+          <div className="border-t border-border/60" />
 
           <TicketActivityTrail items={activityItems} />
 
           {role === "engineer" && ticket.status !== "closed" && (
             <div className="space-y-3">
-              <Button
-                className="w-full"
-                onClick={() => setCloseOpen(true)}
-              >
+              <Button className="w-full" onClick={() => setCloseOpen(true)}>
                 Close Ticket
               </Button>
-
               <Button
                 variant="outline"
                 className="w-full"
@@ -275,17 +282,20 @@ const activityItems: ActivityItem[] = [
 
             await supabase
               .from("tickets")
-              .update({
-                status: "closed",
-                closed_comment: comment,
-              })
+              .update({ status: "closed", closed_comment: comment })
               .eq("id", ticket.id);
 
-            setTicket({
-              ...ticket,
-              status: "closed",
-              closed_comment: comment,
+            /* Notify the ticket requester */
+            await sendNotification({
+              user_id: ticket.requester_id,
+              actor_id: userId,
+              ticket_id: ticket.id,
+              type: "closed",
+              message: `closed your ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
             });
+
+            setCloseOpen(false);
+            setTicket({ ...ticket, status: "closed", closed_comment: comment });
           }}
         />
 
@@ -299,17 +309,20 @@ const activityItems: ActivityItem[] = [
 
             await supabase
               .from("tickets")
-              .update({
-                status: "hold",
-                hold_comment: comment,
-              })
+              .update({ status: "hold", hold_comment: comment })
               .eq("id", ticket.id);
 
-            setTicket({
-              ...ticket,
-              status: "hold",
-              hold_comment: comment,
+            /* Notify the ticket requester */
+            await sendNotification({
+              user_id: ticket.requester_id,
+              actor_id: userId,
+              ticket_id: ticket.id,
+              type: "hold",
+              message: `put your ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold`,
             });
+
+            setHoldOpen(false);
+            setTicket({ ...ticket, status: "hold", hold_comment: comment });
           }}
         />
       </div>
