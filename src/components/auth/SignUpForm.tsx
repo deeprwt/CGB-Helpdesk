@@ -31,6 +31,30 @@ export default function SignUpForm() {
 
     setLoading(true)
 
+    /* ── Domain whitelist check ──────────────────────── */
+    const domain = email.split("@")[1]?.toLowerCase()
+
+    if (!domain) {
+      setLoading(false)
+      toast.error("Please enter a valid email address.")
+      return
+    }
+
+    const { data: org, error: orgErr } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("domain", domain)
+      .eq("status", "active")
+      .maybeSingle()
+
+    if (!orgErr && !org) {
+      setLoading(false)
+      toast.error(
+        "Your organization does not have permission to sign up. Please contact the administrator."
+      )
+      return
+    }
+
     const { error } = await supabase.auth.signUp({
       email,
       password,

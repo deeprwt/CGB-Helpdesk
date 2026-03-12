@@ -3,7 +3,7 @@
 import * as React from "react"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain } from "@/lib/org"
+import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org"
 import { useRouter } from "next/navigation"
 
 import {
@@ -78,7 +78,9 @@ export default function AssetsPage() {
       data: { user: currentUser },
     } = await supabase.auth.getUser()
 
-    const domain = extractOrgDomain(currentUser?.email ?? "")
+    if (!currentUser) { setLoading(false); return }
+    const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
+    const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
 
     const [{ data: assets }, { data: assignments }, { data: users }] =
       await Promise.all([
@@ -91,11 +93,11 @@ export default function AssetsPage() {
           .from("asset_assignments")
           .select("asset_id, user_id"),
 
-        // Only look up users within this org for the assignment email display
+        // Only look up users within accessible org(s)
         supabase
           .from("users")
           .select("id, email")
-          .ilike("email", `%@${domain}`),
+          .or(buildEmailDomainFilter(domains)),
       ])
 
     const userMap = new Map(
@@ -215,7 +217,6 @@ export default function AssetsPage() {
         status: a.status,
         location: a.location,
         department: a.department,
-        room: a.room,
 
         purchase_date: a.purchase_date ?? "",
         warranty_expiry: a.warranty_expiry ?? "",
@@ -226,8 +227,6 @@ export default function AssetsPage() {
         ram: d.ram ?? "",
         storage: d.storage ?? "",
         os_name: d.os_name ?? "",
-        os_version: d.os_version ?? "",
-        ip_address: d.ip_address ?? "",
         mac_address: d.mac_address ?? "",
         vendor: d.vendor ?? "",
 
@@ -243,6 +242,36 @@ export default function AssetsPage() {
 
     toast.success("Excel exported")
     setExportOpen(false)
+  }
+
+  /* ---------------- DOWNLOAD IMPORT TEMPLATE ---------------- */
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      {
+        asset_code: "CGB-001",
+        asset_type: "Laptop",
+        model: "Dell Latitude 5520",
+        status: "in_use",
+        location: "Delhi Office",
+        department: "IT",
+        purchase_date: "2025-01-15",
+        warranty_expiry: "2027-01-15",
+        serial_no: "SN12345678",
+        cpu: "Intel i7-1165G7",
+        ram: "16GB",
+        storage: "512GB SSD",
+        os_name: "Windows 11 Pro",
+        mac_address: "AA:BB:CC:DD:EE:FF",
+        vendor: "Dell Technologies",
+        assigned_user_email: "user@company.com",
+      },
+    ]
+
+    const ws = XLSX.utils.json_to_sheet(templateData)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Assets")
+    XLSX.writeFile(wb, "asset-import-template.xlsx")
+    toast.success("Template downloaded")
   }
 
   /* ---------------- IMPORT (ALL FIELDS) ---------------- */
@@ -264,7 +293,6 @@ export default function AssetsPage() {
           status: r.status ?? "in_use",
           location: r.location ?? null,
           department: r.department ?? "",
-          room: r.room ?? "",
           purchase_date: r.purchase_date || null,
           warranty_expiry: r.warranty_expiry || null,
         })
@@ -279,8 +307,6 @@ export default function AssetsPage() {
         ram: r.ram,
         storage: r.storage,
         os_name: r.os_name,
-        os_version: r.os_version,
-        ip_address: r.ip_address,
         mac_address: r.mac_address,
         vendor: r.vendor,
       })
@@ -319,7 +345,7 @@ export default function AssetsPage() {
 
   /* ---------------- UI ---------------- */
   return (
-    <RoleGate allowedRoles={["engineer", "admin"]}>
+    <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
       <Card className="p-6 space-y-6">
         {/* HEADER */}
         <div className="flex justify-between items-center">
@@ -397,6 +423,19 @@ export default function AssetsPage() {
                   <DialogTitle>Import Assets</DialogTitle>
                 </DialogHeader>
 
+                <p className="text-sm text-muted-foreground">
+                  Download the template to see the required format, fill in your data, then upload.
+                </p>
+
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleDownloadTemplate}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Template
+                </Button>
+
                 <Input
                   type="file"
                   accept=".xlsx,.csv"
@@ -406,7 +445,7 @@ export default function AssetsPage() {
                 />
 
                 <Button
-                  className="w-full mt-4"
+                  className="w-full"
                   disabled={!file}
                   onClick={handleImport}
                 >

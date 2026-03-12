@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 export default function RoleGate({
   allowedRoles,

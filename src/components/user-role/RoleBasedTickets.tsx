@@ -7,7 +7,7 @@ import UserLatestTickets from "@/components/tickets/UserLatestTickets"
 import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 export default function RoleBasedTickets() {
   const [role, setRole] = React.useState<Role | null>(null)
@@ -68,9 +68,12 @@ export default function RoleBasedTickets() {
     )
   }
 
-  if (role === "engineer") return <EngineerTicketTable />
   if (role === "user") return <UserLatestTickets />
 
-  // admin → blank for now
+  // engineer, admin, superadmin → show all org tickets
+  if (role === "engineer" || role === "admin" || role === "superadmin") {
+    return <EngineerTicketTable />
+  }
+
   return null
 }

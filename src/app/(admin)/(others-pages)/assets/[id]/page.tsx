@@ -11,6 +11,7 @@ import {
   TabsContent,
 } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import RoleGate from "@/components/auth/RoleGate"
 
 /* ---------------- TYPES ---------------- */
 
@@ -150,6 +151,7 @@ export default function AssetDetailsPage() {
   }
 
   return (
+    <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
     <Card className="p-6 space-y-6">
       <h2 className="text-xl font-semibold">
         Asset: {asset.asset_code}
@@ -264,5 +266,6 @@ export default function AssetDetailsPage() {
         </TabsContent>
       </Tabs>
     </Card>
+    </RoleGate>
   )
 }

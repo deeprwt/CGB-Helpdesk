@@ -80,7 +80,7 @@ export default function EditAssetPage() {
     if (!data) return <Skeleton className="h-96 w-full" />
 
     return (
-        <RoleGate allowedRoles={["engineer", "admin"]}>
+        <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
             <AssetForm
                 mode="edit"
                 assetId={id}

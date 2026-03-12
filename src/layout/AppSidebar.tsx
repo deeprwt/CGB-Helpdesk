@@ -20,7 +20,7 @@ import {
 import SidebarWidget from "./SidebarWidget";
 import { supabase } from "@/lib/supabaseClient";
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 type NavItem = {
   name: string
@@ -41,52 +41,61 @@ const navItems: NavItem[] = [
   {
     icon: <GridIcon />,
     name: "Dashboard",
-     roles: ["user", "engineer", "admin"],
-    subItems: [{ name: "Overview", path: "/", pro: false, roles: ["user", "engineer", "admin"], }],
+     roles: ["user", "engineer", "admin", "superadmin"],
+    subItems: [{ name: "Overview", path: "/", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
   },
   {
     icon: <CalenderIcon />,
     name: "Tickets",
     path: "/ticket",
-   roles: ["user", "engineer", "admin"],
+   roles: ["user", "engineer", "admin", "superadmin"],
   },
   {
     icon: <UserCircleIcon />,
     name: "User Profile",
     path: "/profile",
-     roles: ["user", "engineer", "admin"],
+     roles: ["user", "engineer", "admin", "superadmin"],
   },
   { 
     icon: <UserCircleIcon />,
     name: "User & Role",
     path: "/user",
-     roles: ["engineer", "admin"],
+     roles: ["engineer", "admin", "superadmin"],
   },
-    { 
+    {
     icon: <UserCircleIcon />,
     name: "Assets",
     path: "/assets",
-     roles: ["engineer", "admin"],
+     roles: ["engineer", "admin", "superadmin"],
+  },
+  {
+    icon: <PlugInIcon />,
+    name: "Super Admin",
+    roles: ["superadmin"],
+    subItems: [
+      { name: "Organizations", path: "/super-admin/organizations", roles: ["superadmin"] },
+      { name: "Access Control", path: "/super-admin/access-control", roles: ["superadmin"] },
+    ],
   },
   // {
   //   name: "Forms",
   //   icon: <ListIcon />,
-  //    roles: ["user", "engineer", "admin"],
-  //   subItems: [{ name: "Form Elements", path: "/form-elements", pro: false, roles: ["user", "engineer", "admin"], }],
+  //    roles: ["user", "engineer", "admin", "superadmin"],
+  //   subItems: [{ name: "Form Elements", path: "/form-elements", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
   // },
   // {
   //   name: "Tables",
   //   icon: <TableIcon />,
-  //    roles: ["user", "engineer", "admin"],
-  //   subItems: [{ name: "Basic Tables", path: "/basic-tables", pro: false, roles: ["user", "engineer", "admin"], }],
+  //    roles: ["user", "engineer", "admin", "superadmin"],
+  //   subItems: [{ name: "Basic Tables", path: "/basic-tables", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
   // },
   // {
   //   name: "Pages",
   //   icon: <PageIcon />,
-  //    roles: ["user", "engineer", "admin"],
+  //    roles: ["user", "engineer", "admin", "superadmin"],
   //   subItems: [
-  //     { name: "Blank Page", path: "/blank", pro: false, roles: ["user", "engineer", "admin"], },
-  //     { name: "404 Error", path: "/error-404", pro: false, roles: ["user", "engineer", "admin"], },
+  //     { name: "Blank Page", path: "/blank", pro: false, roles: ["user", "engineer", "admin", "superadmin"], },
+  //     { name: "404 Error", path: "/error-404", pro: false, roles: ["user", "engineer", "admin", "superadmin"], },
   //   ],
   // },
 ];
@@ -128,23 +137,37 @@ const AppSidebar: React.FC = () => {
   const [role, setRole] = useState<Role | null>(null)
 
 useEffect(() => {
-  const loadRole = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
+  let cancelled = false
 
-    if (!session) return
-
+  const fetchRole = async (userId: string) => {
     const { data } = await supabase
       .from("users")
       .select("role")
-      .eq("id", session.user.id)
+      .eq("id", userId)
       .single()
-
-    setRole((data?.role as Role) ?? "user")
+    if (!cancelled) setRole((data?.role as Role) ?? "user")
   }
 
-  loadRole()
+  // Immediate fetch — covers Strict Mode double-mount where INITIAL_SESSION is missed
+  supabase.auth.getUser().then(({ data: { user } }) => {
+    if (user) fetchRole(user.id)
+  })
+
+  // Also listen for auth state changes (sign-in, sign-out, token refresh)
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      if (session?.user) {
+        fetchRole(session.user.id)
+      } else if (!cancelled) {
+        setRole(null)
+      }
+    }
+  )
+
+  return () => {
+    cancelled = true
+    subscription.unsubscribe()
+  }
 }, [])
 
 

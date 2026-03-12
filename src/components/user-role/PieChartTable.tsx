@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Pie, PieChart } from "recharts"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
+import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 import {
   Card,
@@ -32,7 +32,7 @@ import {
 /* ---------------- TYPES ---------------- */
 
 type Range = "weekly" | "monthly" | "yearly"
-type UserRole = "user" | "engineer" | "admin"
+type UserRole = "user" | "engineer" | "admin" | "superadmin"
 
 type ChartRow = {
   key: string
@@ -117,9 +117,9 @@ export function PieChartTable() {
 
       const fromDate = getFromDate(range)
 
-      // Scope aggregate counts to this org only
-      const domain = extractOrgDomain(user.email ?? "")
-      const orgUserIds = await getOrgUserIds(supabase, domain)
+      // Scope aggregate counts to user's accessible org(s)
+      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", profile.role)
+      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
       if (orgUserIds.length === 0) {
         setData([

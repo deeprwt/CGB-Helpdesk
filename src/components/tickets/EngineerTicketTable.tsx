@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
+import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
 import {
   Table,
   TableBody,
@@ -67,9 +67,15 @@ export default function EngineerTicketTable() {
       .range(from, to)
 
     if (tab === "queue") {
-      // Queue: unassigned tickets scoped to this engineer's org
-      const domain = extractOrgDomain(user.email ?? "")
-      const orgUserIds = await getOrgUserIds(supabase, domain)
+      // Queue: unassigned tickets scoped to this engineer's org(s)
+      const { data: roleData } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", user.id)
+        .single()
+      const userRole = roleData?.role ?? "engineer"
+      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", userRole)
+      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
       if (orgUserIds.length === 0) {
         setTickets([])

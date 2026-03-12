@@ -16,11 +16,12 @@ import TicketActivityTrail, {
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
 import { sendNotification } from "@/lib/notify";
+import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org";
 
 /* -----------------------------------
    Types
 ----------------------------------- */
-type Role = "user" | "engineer" | "admin";
+type Role = "user" | "engineer" | "admin" | "superadmin";
 
 type TicketStatus =
   | "new"
@@ -84,6 +85,42 @@ function fmtDate(d: Date) {
 }
 
 /* -----------------------------------
+   Access control
+----------------------------------- */
+async function checkTicketAccess(
+  role: Role,
+  userId: string,
+  email: string,
+  ticket: Ticket
+): Promise<boolean> {
+  // superadmin can see everything
+  if (role === "superadmin") return true;
+
+  // user can only see their own tickets
+  if (role === "user") return ticket.requester_id === userId;
+
+  // engineer / admin — can only see:
+  //   1. Tickets assigned to themselves
+  //   2. Unassigned tickets in their org (queue)
+  if (role === "engineer" || role === "admin") {
+    // Assigned to this user → allow
+    if (ticket.assignee === userId) return true;
+
+    // Unassigned (in queue) + same org → allow
+    if (ticket.assignee === null) {
+      const domains = await getUserAccessibleDomains(supabase, userId, email, role);
+      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains);
+      return orgUserIds.includes(ticket.requester_id);
+    }
+
+    // Assigned to another engineer → deny
+    return false;
+  }
+
+  return false;
+}
+
+/* -----------------------------------
    Page
 ----------------------------------- */
 export default function TicketDetailsPage() {
@@ -125,14 +162,34 @@ export default function TicketDetailsPage() {
           .single(),
       ]);
 
+      const currentRole: Role = roleData?.role ?? "user";
+
+      if (!ticketData) {
+        router.replace("/ticket");
+        return;
+      }
+
+      /* ── Authorization check ── */
+      const hasAccess = await checkTicketAccess(
+        currentRole,
+        user.id,
+        user.email ?? "",
+        ticketData
+      );
+
+      if (!hasAccess) {
+        router.replace("/ticket");
+        return;
+      }
+
       setTicket(ticketData);
       setMessages(chatData ?? []);
-      setRole(roleData?.role ?? "user");
+      setRole(currentRole);
       setLoading(false);
     };
 
     loadData();
-  }, [id]);
+  }, [id, router]);
 
   if (loading || !ticket || !userId || !role) {
     return (
@@ -256,7 +313,7 @@ export default function TicketDetailsPage() {
 
           <TicketActivityTrail items={activityItems} />
 
-          {role === "engineer" && ticket.status !== "closed" && (
+          {role !== "user" && ticket.status !== "closed" && (
             <div className="space-y-3">
               <Button className="w-full" onClick={() => setCloseOpen(true)}>
                 Close Ticket
@@ -278,7 +335,7 @@ export default function TicketDetailsPage() {
           onClose={() => setCloseOpen(false)}
           title="Close Ticket Comment"
           onSubmit={async (comment) => {
-            if (role !== "engineer") return;
+            if (role === "user") return;
 
             await supabase
               .from("tickets")
@@ -305,7 +362,7 @@ export default function TicketDetailsPage() {
           onClose={() => setHoldOpen(false)}
           title="Hold Ticket Comment"
           onSubmit={async (comment) => {
-            if (role !== "engineer") return;
+            if (role === "user") return;
 
             await supabase
               .from("tickets")

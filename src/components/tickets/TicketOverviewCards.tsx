@@ -5,9 +5,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TrendingUp } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain, getOrgUserIds } from "@/lib/org"
+import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 type OverviewStat = {
   label: string
@@ -87,9 +87,9 @@ export default function TicketOverviewCards() {
       /* ----------------------------
          ENGINEER / ADMIN STATS — scoped to this org only
       ---------------------------- */
-      if (role === "engineer" || role === "admin") {
-        const domain = extractOrgDomain(user.email ?? "")
-        const orgUserIds = await getOrgUserIds(supabase, domain)
+      if (role === "engineer" || role === "admin" || role === "superadmin") {
+        const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", role)
+        const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
         if (orgUserIds.length === 0) {
           setStats([

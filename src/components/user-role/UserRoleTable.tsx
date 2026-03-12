@@ -4,7 +4,7 @@ import * as React from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain } from "@/lib/org"
+import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org"
 
 import {
   ColumnDef,
@@ -19,7 +19,8 @@ import {
   useReactTable,
 } from "@tanstack/react-table"
 import {
-  Eye
+  Eye,
+  Trash2,
 } from "lucide-react"
 import { ArrowUpDown, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -44,7 +45,7 @@ import { toast } from "sonner"
 
 /* ---------------- TYPES ---------------- */
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 type Employee = {
   id: string
@@ -100,7 +101,7 @@ export default function EmployeeTable() {
         .eq("id", userId)
         .single()
 
-      if (!me || !["admin", "engineer"].includes(me.role)) {
+      if (!me || !["admin", "engineer", "superadmin"].includes(me.role)) {
         setData([])
         setLoading(false)
         return
@@ -108,8 +109,8 @@ export default function EmployeeTable() {
 
       setCurrentRole(me.role)
 
-      // Scope to current user's org domain
-      const domain = extractOrgDomain(session.user.email ?? "")
+      // Scope to user's accessible org domain(s)
+      const domains = await getUserAccessibleDomains(supabase, session.user.id, session.user.email ?? "", me.role)
 
       let query = supabase.from("users").select(`
         id,
@@ -123,7 +124,7 @@ export default function EmployeeTable() {
         city,
         avatar_url
       `)
-        .ilike("email", `%@${domain}`)
+        .or(buildEmailDomainFilter(domains))
 
       if (me.role === "engineer") {
         query = query.in("role", ["user", "engineer"])
@@ -258,40 +259,39 @@ export default function EmployeeTable() {
       cell: ({ row }) => {
         const user = row.original
 
-        const canEdit =
-          (currentRole === "engineer" &&
-            user.role === "user") ||
+        const canView =
+          currentRole === "superadmin" ||
           (currentRole === "admin" &&
             (user.role === "user" ||
-              user.role === "engineer"))
+              user.role === "engineer")) ||
+          (currentRole === "engineer" &&
+            user.role === "user")
+
+        const canDelete =
+          (currentRole === "admin" || currentRole === "superadmin") &&
+          user.role !== "admin" && user.role !== "superadmin"
 
         return (
           <div className="flex gap-2">
-            {canEdit && (
+            {canView && (
               <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                        router.push(`/profile/${user.id}`)
-                        }
-                      >
-                        <Eye className="h-5 w-5" />
-                      </Button>
-
+                size="icon"
+                variant="ghost"
+                onClick={() => router.push(`/profile/${user.id}`)}
+              >
+                <Eye className="h-5 w-5" />
+              </Button>
             )}
 
-            {currentRole === "admin" &&
-              user.role !== "admin" && (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    handleDeleteUser(user)
-                  }
-                >
-                  Delete
-                </Button>
-              )}
+            {canDelete && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => handleDeleteUser(user)}
+              >
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </Button>
+            )}
           </div>
         )
       },

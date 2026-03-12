@@ -21,9 +21,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import { extractOrgDomain } from "@/lib/org";
+import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org";
 
-type UserRole = "user" | "engineer" | "admin";
+type UserRole = "user" | "engineer" | "admin" | "superadmin";
 
 interface OnlineEngineer {
   id: string;
@@ -119,15 +119,14 @@ export default function TeammatesCard() {
         Date.now() - 2 * 60 * 1000
       ).toISOString();
 
-      // Scope to this org's engineers only
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const domain = extractOrgDomain(authUser?.email ?? "");
+      // Scope to accessible org(s) engineers
+      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", profile.role);
 
       const { data } = await supabase
         .from("users")
         .select("id, full_name, avatar_url, last_seen_at")
         .eq("role", "engineer")
-        .ilike("email", `%@${domain}`)
+        .or(buildEmailDomainFilter(domains))
         .gte("last_seen_at", onlineCutoff)
         .order("last_seen_at", { ascending: false })
         .limit(5);

@@ -17,7 +17,7 @@ import { toast } from "sonner"
 
 /* ---------------- TYPES ---------------- */
 
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 type UserProfile = {
   id: string
@@ -29,6 +29,7 @@ type UserProfile = {
   department: string | null
   position: string | null
   manager: string | null
+  phone: string | null
   present_address: string | null
   permanent_address: string | null
   city: string | null
@@ -98,14 +99,18 @@ export default function UserInfoCard({
       // own profile
       profile.id === currentUserId ||
 
-      // engineer → user
-      (currentRole === "engineer" &&
-        profile.role === "user") ||
+      // superadmin → everyone except other superadmins
+      (currentRole === "superadmin" &&
+        profile.role !== "superadmin") ||
 
       // admin → user + engineer
       (currentRole === "admin" &&
         (profile.role === "user" ||
-          profile.role === "engineer"))
+          profile.role === "engineer")) ||
+
+      // engineer → user
+      (currentRole === "engineer" &&
+        profile.role === "user")
     )
 
   /* ---------------- HANDLERS ---------------- */
@@ -137,6 +142,7 @@ export default function UserInfoCard({
         department: profile.department,
         position: profile.position,
         manager: profile.manager,
+        phone: profile.phone,
         present_address: profile.present_address,
         permanent_address: profile.permanent_address,
         city: profile.city,
@@ -206,6 +212,7 @@ export default function UserInfoCard({
               ["designation", "Designation"],
               ["position", "Position"],
               ["manager", "Manager"],
+              ["phone", "Phone Number"],
               ["city", "City"],
               ["postal_code", "Postal Code"],
               ["country", "Country"],

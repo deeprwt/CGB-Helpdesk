@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain } from "@/lib/org"
+import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org"
 import { useRouter } from "next/navigation"
 
 import { Card } from "@/components/ui/card"
@@ -49,7 +49,6 @@ export type AssetFormState = {
   model: string
   status: "in_use" | "spare" | "retired"
   location: string
-  room: string
   department: string
 
   serial_no: string
@@ -57,8 +56,6 @@ export type AssetFormState = {
   ram: string
   storage: string
   os_name: string
-  os_version: string
-  ip_address: string
   mac_address: string
   vendor: string
   purchase_date: string
@@ -92,15 +89,12 @@ export default function AssetForm({
       model: "",
       status: "in_use",
       location: "",
-      room: "",
       department: "",
       serial_no: "",
       cpu: "",
       ram: "",
       storage: "",
       os_name: "",
-      os_version: "",
-      ip_address: "",
       mac_address: "",
       vendor: "",
       purchase_date: "",
@@ -120,12 +114,14 @@ export default function AssetForm({
         data: { user: currentUser },
       } = await supabase.auth.getUser()
 
-      const domain = extractOrgDomain(currentUser?.email ?? "")
+      if (!currentUser) return
+      const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
+      const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
 
       const { data } = await supabase
         .from("users")
         .select("id, email")
-        .ilike("email", `%@${domain}`)
+        .or(buildEmailDomainFilter(domains))
         .order("email")
 
       setUsers(data ?? [])
@@ -177,7 +173,6 @@ export default function AssetForm({
           model: form.model,
           status: form.status,
           location: form.location,
-          room: form.room,
           department: form.department,
           purchase_date: form.purchase_date || null,
           warranty_expiry: form.warranty_expiry || null,
@@ -201,7 +196,6 @@ export default function AssetForm({
           model: form.model,
           status: form.status,
           location: form.location,
-          room: form.room,
           department: form.department,
           purchase_date: form.purchase_date || null,
           warranty_expiry: form.warranty_expiry || null,
@@ -226,8 +220,6 @@ export default function AssetForm({
       ram: form.ram,
       storage: form.storage,
       os_name: form.os_name,
-      os_version: form.os_version,
-      ip_address: form.ip_address,
       mac_address: form.mac_address,
       vendor: form.vendor,
     })
@@ -272,37 +264,41 @@ export default function AssetForm({
             ["asset_type", "Asset Type"],
             ["model", "Model"],
             ["location", "Location"],
-            ["room", "Room"],
             ["department", "Department"],
           ].map(([key, label]) => (
-            <Input
-              key={key}
-              placeholder={label}
-              value={form[key as keyof AssetFormState]}
-              onChange={(e) =>
-                setForm({ ...form, [key]: e.target.value })
-              }
-            />
+            <div key={key}>
+              <Label className="mb-1.5 block">{label}</Label>
+              <Input
+                placeholder={label}
+                value={form[key as keyof AssetFormState]}
+                onChange={(e) =>
+                  setForm({ ...form, [key]: e.target.value })
+                }
+              />
+            </div>
           ))}
 
-          <Select
-            value={form.status}
-            onValueChange={(v) =>
-              setForm({
-                ...form,
-                status: v as AssetFormState["status"],
-              })
-            }
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="in_use">In Use</SelectItem>
-              <SelectItem value="spare">Spare</SelectItem>
-              <SelectItem value="retired">Retired</SelectItem>
-            </SelectContent>
-          </Select>
+          <div>
+            <Label className="mb-1.5 block">Status</Label>
+            <Select
+              value={form.status}
+              onValueChange={(v) =>
+                setForm({
+                  ...form,
+                  status: v as AssetFormState["status"],
+                })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="in_use">In Use</SelectItem>
+                <SelectItem value="spare">Spare</SelectItem>
+                <SelectItem value="retired">Retired</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="col-span-full flex justify-end">
             <Button onClick={() => setActiveTab("details")}>
@@ -314,40 +310,46 @@ export default function AssetForm({
         {/* DETAILS */}
         <TabsContent value="details" className="mt-4 grid md:grid-cols-2 gap-4">
           {[
-            "serial_no",
-            "cpu",
-            "ram",
-            "storage",
-            "os_name",
-            "os_version",
-            "ip_address",
-            "mac_address",
-            "vendor",
-          ].map((key) => (
-            <Input
-              key={key}
-              placeholder={key.replace("_", " ").toUpperCase()}
-              value={form[key as keyof AssetFormState]}
-              onChange={(e) =>
-                setForm({ ...form, [key]: e.target.value })
-              }
-            />
+            ["serial_no", "Serial No"],
+            ["cpu", "CPU"],
+            ["ram", "RAM"],
+            ["storage", "Storage"],
+            ["os_name", "OS Name"],
+            ["mac_address", "MAC Address"],
+            ["vendor", "Vendor"],
+          ].map(([key, label]) => (
+            <div key={key}>
+              <Label className="mb-1.5 block">{label}</Label>
+              <Input
+                placeholder={label}
+                value={form[key as keyof AssetFormState]}
+                onChange={(e) =>
+                  setForm({ ...form, [key]: e.target.value })
+                }
+              />
+            </div>
           ))}
 
-          <Input
-            type="date"
-            value={form.purchase_date}
-            onChange={(e) =>
-              setForm({ ...form, purchase_date: e.target.value })
-            }
-          />
-          <Input
-            type="date"
-            value={form.warranty_expiry}
-            onChange={(e) =>
-              setForm({ ...form, warranty_expiry: e.target.value })
-            }
-          />
+          <div>
+            <Label className="mb-1.5 block">Purchase Date</Label>
+            <Input
+              type="date"
+              value={form.purchase_date}
+              onChange={(e) =>
+                setForm({ ...form, purchase_date: e.target.value })
+              }
+            />
+          </div>
+          <div>
+            <Label className="mb-1.5 block">Warranty Expiry</Label>
+            <Input
+              type="date"
+              value={form.warranty_expiry}
+              onChange={(e) =>
+                setForm({ ...form, warranty_expiry: e.target.value })
+              }
+            />
+          </div>
 
           <div className="col-span-full flex justify-between">
             <Button variant="outline" onClick={() => setActiveTab("basic")}>
