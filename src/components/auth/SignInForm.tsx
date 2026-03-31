@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { ChevronLeft, Eye, EyeOff } from "lucide-react"
-import { useRouter } from "next/navigation"
+// import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -18,10 +18,13 @@ export default function SignInForm() {
   const [password, setPassword] = React.useState("")
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const router = useRouter()
   const [forgotOpen, setForgotOpen] = React.useState(false)
   const [forgotEmail, setForgotEmail] = React.useState("")
   const [forgotLoading, setForgotLoading] = React.useState(false)
+
+  // Verification state
+  const [needsVerification, setNeedsVerification] = React.useState(false)
+  const [resending, setResending] = React.useState(false)
 
   async function handleForgotPassword() {
     if (!forgotEmail) {
@@ -47,40 +50,79 @@ export default function SignInForm() {
     setForgotEmail("")
   }
 
+  async function handleResendVerification() {
+    setResending(true)
 
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      })
+
+      const data = await res.json()
+
+      if (data.already_verified) {
+        setNeedsVerification(false)
+        setError(null)
+        toast.success("Your email is already verified. Please sign in.")
+        return
+      }
+
+      toast.success("Verification email sent! Please check your inbox.")
+    } catch {
+      toast.error("Failed to resend verification email")
+    } finally {
+      setResending(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    setNeedsVerification(false)
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (error) {
-      setError(error.message)
+    if (signInError) {
+      setError(signInError.message)
       setLoading(false)
       return
     }
 
-    // ✅ Stop loading BEFORE redirect
-    setLoading(false)
+    // Check if user is verified
+    if (signInData.user) {
+      const { data: userData } = await supabase
+        .from("users")
+        .select("is_verified")
+        .eq("id", signInData.user.id)
+        .single()
 
-    // ✅ HARD redirect (bypasses middleware race)
+      if (userData && userData.is_verified === false) {
+        // Sign out immediately — unverified users cannot access the app
+        await supabase.auth.signOut()
+        setNeedsVerification(true)
+        setError(null)
+        setLoading(false)
+        return
+      }
+    }
+
+    setLoading(false)
     toast.success("Login Successfully")
 
     setTimeout(() => {
       window.location.href = "/"
     }, 800)
-
   }
 
-
-  async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({ provider: "google" })
-  }
+  // async function signInWithGoogle() {
+  //   await supabase.auth.signInWithOAuth({ provider: "google" })
+  // }
 
   return (
     <div className="flex flex-col flex-1 lg:w-1/2 w-full">
@@ -103,7 +145,7 @@ export default function SignInForm() {
             Enter your email and password to sign in!
           </p>
         </div>
-{/* 
+{/*
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
           <Button variant="secondary" className="gap-3 py-3" onClick={signInWithGoogle}>
             Sign in with Google
@@ -173,6 +215,34 @@ export default function SignInForm() {
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 
+          {/* Verification required banner */}
+          {needsVerification && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+              <div className="flex items-start gap-3">
+                <span className="text-xl">📧</span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    Please verify your email before logging in.
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    Check your inbox for a verification link. If you didn&apos;t
+                    receive it, click below to resend.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                    onClick={handleResendVerification}
+                    disabled={resending}
+                  >
+                    {resending ? "Sending..." : "Resend Verification Email"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <Button className="w-full" size="sm" disabled={loading}>
             {loading ? "Signing in..." : "Sign in"}
           </Button>
@@ -194,7 +264,7 @@ export default function SignInForm() {
               Reset Password
             </h2>
             <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-              Enter your email and we’ll send you a reset link.
+              Enter your email and we&apos;ll send you a reset link.
             </p>
 
             <div className="space-y-4">

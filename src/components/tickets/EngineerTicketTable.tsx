@@ -20,7 +20,8 @@ import { Eye } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { timeAgo, STATUS_STYLE } from "@/lib/ticket-utils"
-import { sendNotification } from "@/lib/notify"
+import { sendNotification, sendEmailNotification } from "@/lib/notify"
+import { logActivity } from "@/lib/activity"
 
 const PAGE_SIZE = 50
 
@@ -128,12 +129,16 @@ export default function EngineerTicketTable() {
 
     if (!user) return
 
+    const now = new Date()
+    const slaResolutionAt = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString()
+
     const { error } = await supabase
       .from("tickets")
       .update({
         assignee: user.id,
         status: "open",
-        assigned_at: new Date().toISOString(),
+        assigned_at: now.toISOString(),
+        sla_resolution_at: slaResolutionAt,
       })
       .eq("id", ticketId)
       .is("assignee", null)
@@ -151,6 +156,39 @@ export default function EngineerTicketTable() {
         type: "acquired",
         message: `acquired your ticket #${ticketId.slice(0, 8).toUpperCase()}`,
       })
+
+      /* Send email notification */
+      const [requesterRes, engineerRes, ticketRes] = await Promise.all([
+        supabase.from("users").select("email, name").eq("id", requesterId).single(),
+        supabase.from("users").select("name").eq("id", user.id).single(),
+        supabase.from("tickets").select("subject").eq("id", ticketId).single(),
+      ])
+
+      if (requesterRes.data?.email) {
+        sendEmailNotification({
+          recipient_email: requesterRes.data.email,
+          recipient_name: requesterRes.data.name ?? "User",
+          actor_name: engineerRes.data?.name ?? "Support Engineer",
+          ticket_id: ticketId,
+          ticket_subject: ticketRes.data?.subject ?? "Support Ticket",
+          action: "acquired",
+        })
+      }
+
+      /* Log activity + assignment record */
+      logActivity({
+        ticket_id: ticketId,
+        actor_id: user.id,
+        action: "acquired",
+        details: { engineer_name: engineerRes.data?.name ?? "Engineer" },
+      })
+
+      // Insert assignment record (non-blocking)
+      supabase.from("ticket_assignments").insert({
+        ticket_id: ticketId,
+        engineer_id: user.id,
+        action: "acquired",
+      }).then(() => {})
 
       loadTickets()
     }

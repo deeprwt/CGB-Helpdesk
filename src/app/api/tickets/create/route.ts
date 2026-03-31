@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { sendTicketEmail } from "@/lib/email"
 
 export const runtime = "nodejs"
 
@@ -73,6 +74,9 @@ export async function POST(req: Request) {
     /* -----------------------------------
        5️⃣ Insert ticket
     ----------------------------------- */
+    const now = new Date()
+    const slaResponseAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString()
+
     const { data: ticket, error: ticketError } = await supabaseAdmin
       .from("tickets")
       .insert({
@@ -87,12 +91,79 @@ export async function POST(req: Request) {
         status: "new",
         location: formData.get("location")?.toString() ?? null,
         link: formData.get("link")?.toString() ?? null,
+        sla_response_at: slaResponseAt,
       })
       .select()
       .single()
 
     if (ticketError || !ticket) {
       throw ticketError
+    }
+
+    /* Log ticket creation activity */
+    await supabaseAdmin.from("ticket_activity").insert({
+      ticket_id: ticket.id,
+      actor_id: requesterId,
+      action: "created",
+      details: {},
+    })
+
+    /* -----------------------------------
+       5.5️⃣ Notify admins & requester about new ticket
+    ----------------------------------- */
+    const requesterName = formData.get("requester_name")?.toString() ?? ""
+    const ticketSubject = formData.get("subject")?.toString() ?? ""
+    const ticketShortId = ticket.id.slice(0, 8).toUpperCase()
+
+    // Get requester email
+    const { data: requesterData } = await supabaseAdmin
+      .from("users")
+      .select("email")
+      .eq("id", requesterId)
+      .single()
+
+    // Email confirmation to requester
+    if (requesterData?.email) {
+      sendTicketEmail({
+        to: requesterData.email,
+        recipientName: requesterName,
+        actorName: requesterName,
+        ticketId: ticket.id,
+        ticketSubject,
+        action: "created",
+      }).catch(() => {})
+    }
+
+    // Notify all admins
+    const { data: admins } = await supabaseAdmin
+      .from("users")
+      .select("id, name, email")
+      .in("role", ["admin", "superadmin"])
+
+    for (const admin of admins ?? []) {
+      if (admin.id === requesterId) continue
+
+      // In-app notification
+      await supabaseAdmin.from("notifications").insert({
+        user_id: admin.id,
+        actor_id: requesterId,
+        ticket_id: ticket.id,
+        type: "status_changed",
+        message: `New ticket #${ticketShortId} raised by ${requesterName}`,
+        is_read: false,
+      })
+
+      // Email to admin
+      if (admin.email) {
+        sendTicketEmail({
+          to: admin.email,
+          recipientName: admin.name ?? "Admin",
+          actorName: requesterName,
+          ticketId: ticket.id,
+          ticketSubject,
+          action: "created",
+        }).catch(() => {})
+      }
     }
 
     /* -----------------------------------

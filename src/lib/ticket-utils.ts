@@ -12,5 +12,6 @@ export const STATUS_STYLE: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
   open: "bg-yellow-100 text-yellow-700",
   in_progress: "bg-orange-100 text-orange-700",
+  hold: "bg-amber-100 text-amber-700",
   closed: "bg-green-100 text-green-700",
 }

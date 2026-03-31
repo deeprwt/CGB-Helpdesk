@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Send, Paperclip, ChevronDown, ChevronUp, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ActivityItem } from "./TicketActivityTrail"
-import { sendNotification } from "@/lib/notify"
+import { sendNotification, sendEmailNotification } from "@/lib/notify"
 
 /* -----------------------------------
    Types
@@ -29,6 +29,7 @@ type Message = {
 
 type Props = {
   ticketId: string
+  ticketSubject?: string
   messages: Message[]
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   currentUser: Profile
@@ -76,6 +77,7 @@ const ACTIVITY_PILL: Record<string, string> = {
 ----------------------------------- */
 export default function TicketChat({
   ticketId,
+  ticketSubject,
   messages,
   setMessages,
   currentUser,
@@ -160,6 +162,25 @@ export default function TicketChat({
         type: "message",
         message: "sent you a message",
       })
+
+      /* Also send email when user is offline */
+      const { data: recipientData } = await supabase
+        .from("users")
+        .select("email, name")
+        .eq("id", otherUser.id)
+        .single()
+
+      if (recipientData?.email) {
+        sendEmailNotification({
+          recipient_email: recipientData.email,
+          recipient_name: recipientData.name ?? otherUser.name,
+          actor_name: currentUser.name,
+          ticket_id: ticketId,
+          ticket_subject: ticketSubject ?? "Support Ticket",
+          action: "message",
+          comment: msg,
+        })
+      }
     }
   }
 

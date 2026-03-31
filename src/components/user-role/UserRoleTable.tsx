@@ -158,29 +158,48 @@ export default function EmployeeTable() {
   /* ---------------- DELETE USER ---------------- */
 
   const handleDeleteUser = async (user: Employee) => {
-    if (user.role === "admin") {
+    if (user.role === "admin" || user.role === "superadmin") {
       toast.error("Admin account cannot be deleted")
       return
     }
 
     const ok = window.confirm(
-      `Are you sure you want to delete ${user.name}?`
+      `Are you sure you want to delete ${user.name}? This will immediately log them out of all sessions.`
     )
 
     if (!ok) return
 
-    const { error } = await supabase
-      .from("users")
-      .delete()
-      .eq("id", user.id)
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
 
-    if (error) {
-      toast.error(error.message)
-      return
+      if (!session) {
+        toast.error("You must be logged in")
+        return
+      }
+
+      const res = await fetch("/api/user/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ target_user_id: user.id }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to delete user")
+        return
+      }
+
+      toast.success("User deleted and all sessions invalidated")
+      setData((prev) => prev.filter((u) => u.id !== user.id))
+    } catch {
+      toast.error("Failed to delete user")
     }
-
-    toast.success("User deleted")
-    setData((prev) => prev.filter((u) => u.id !== user.id))
   }
 
   /* ---------------- COLUMNS ---------------- */

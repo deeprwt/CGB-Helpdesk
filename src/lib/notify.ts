@@ -40,3 +40,36 @@ export async function sendNotification(params: {
     // Non-blocking — notification failure should never break the main action
   }
 }
+
+/**
+ * Sends an email notification via the /api/email/send route.
+ * Non-blocking — failures are silently caught.
+ */
+export async function sendEmailNotification(params: {
+  recipient_email: string
+  recipient_name: string
+  actor_name: string
+  ticket_id: string
+  ticket_subject: string
+  action: string
+  comment?: string | null
+}): Promise<void> {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) return
+
+    await fetch("/api/email/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(params),
+    })
+  } catch {
+    // Non-blocking — email failure should never break the main action
+  }
+}
