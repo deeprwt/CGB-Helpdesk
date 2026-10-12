@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/sla/check",
-      "schedule": "*/2 * * * *"
-    }
-  ]
-}

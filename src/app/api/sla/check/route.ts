@@ -21,9 +21,11 @@ export async function GET(req: Request) {
     /* Simple auth: cron secret or allow in dev */
     const { searchParams } = new URL(req.url)
     const key = searchParams.get("key")
+    // Vercel Cron / pg_net send the secret as "Authorization: Bearer <secret>"
+    const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
     const cronSecret = process.env.CRON_SECRET
 
-    if (cronSecret && key !== cronSecret) {
+    if (cronSecret && key !== cronSecret && bearer !== cronSecret) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
