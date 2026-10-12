@@ -84,6 +84,39 @@ export async function getUserAccessibleDomains(
   return [extractOrgDomain(userEmail)]
 }
 
+export type Organization = {
+  id: string
+  name: string
+  domain: string
+}
+
+/**
+ * Returns the organization records a user is allowed to access
+ * (same rules as getUserAccessibleDomains), sorted by name.
+ */
+export async function getUserAccessibleOrganizations(
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  userRole: string
+): Promise<Organization[]> {
+  const domains = await getUserAccessibleDomains(
+    supabase,
+    userId,
+    userEmail,
+    userRole
+  )
+
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("id, name, domain")
+    .in("domain", domains)
+    .order("name")
+
+  if (error) return []
+  return (data ?? []) as Organization[]
+}
+
 /**
  * Returns user IDs across multiple organisation domains.
  * Used for cross-org ticket filtering when an admin has

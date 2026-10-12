@@ -53,6 +53,7 @@ export default function EditAssetPage() {
             setAssignedUser(user)
 
             setData({
+                organization_id: asset.organization_id ?? "",
                 asset_code: asset.asset_code ?? "",
                 asset_type: asset.asset_type ?? "",
                 model: asset.model ?? "",

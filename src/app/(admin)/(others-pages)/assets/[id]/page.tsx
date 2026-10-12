@@ -26,6 +26,7 @@ type Asset = {
   room: string | null
   purchase_date: string | null
   warranty_expiry: string | null
+  organization: { name: string; domain: string } | null
 }
 
 type AssetDetail = {
@@ -83,7 +84,8 @@ export default function AssetDetailsPage() {
           department,
           room,
           purchase_date,
-          warranty_expiry
+          warranty_expiry,
+          organization:organization_id (name, domain)
         `)
         .eq("id", id)
         .single()
@@ -129,7 +131,7 @@ export default function AssetDetailsPage() {
           isCurrent: a.returned_at === null,
         })) ?? []
 
-      setAsset(asset ?? null)
+      setAsset((asset as unknown as Asset) ?? null)
       setDetails(details ?? [])
       setAssignments(mappedAssignments)
       setLoading(false)
@@ -168,6 +170,12 @@ export default function AssetDetailsPage() {
         {/* BASIC */}
         <TabsContent value="basic">
           <Card className="p-4 space-y-2">
+            <div>
+              <b>Organization:</b>{" "}
+              {asset.organization
+                ? `${asset.organization.name} (${asset.organization.domain})`
+                : "-"}
+            </div>
             <div><b>Type:</b> {asset.asset_type}</div>
             <div><b>Status:</b> {asset.status}</div>
             <div><b>Location:</b> {asset.location ?? "-"}</div>

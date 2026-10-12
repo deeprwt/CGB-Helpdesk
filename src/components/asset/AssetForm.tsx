@@ -2,7 +2,13 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org"
+import {
+  getUserAccessibleDomains,
+  getUserAccessibleOrganizations,
+  buildEmailDomainFilter,
+  extractOrgDomain,
+  type Organization,
+} from "@/lib/org"
 import { useRouter } from "next/navigation"
 
 import { Card } from "@/components/ui/card"
@@ -44,6 +50,7 @@ export type User = {
 }
 
 export type AssetFormState = {
+  organization_id: string
   asset_code: string
   asset_type: string
   model: string
@@ -84,6 +91,7 @@ export default function AssetForm({
 
   const [form, setForm] = React.useState<AssetFormState>(
     initialData ?? {
+      organization_id: "",
       asset_code: "",
       asset_type: "",
       model: "",
@@ -102,8 +110,9 @@ export default function AssetForm({
     }
   )
 
-  /* ---------------- USERS ---------------- */
+  /* ---------------- USERS + ORGANIZATIONS ---------------- */
   const [users, setUsers] = React.useState<User[]>([])
+  const [orgs, setOrgs] = React.useState<Organization[]>([])
   const [openAssign, setOpenAssign] = React.useState(false)
   const [selectedUser, setSelectedUser] =
     React.useState<User | null>(initialAssignedUser)
@@ -116,7 +125,11 @@ export default function AssetForm({
 
       if (!currentUser) return
       const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
-      const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
+      const role = profile?.role ?? "user"
+      const [domains, accessibleOrgs] = await Promise.all([
+        getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", role),
+        getUserAccessibleOrganizations(supabase, currentUser.id, currentUser.email ?? "", role),
+      ])
 
       const { data } = await supabase
         .from("users")
@@ -125,10 +138,43 @@ export default function AssetForm({
         .order("email")
 
       setUsers(data ?? [])
+      setOrgs(accessibleOrgs)
+
+      // Only one organization available → preselect it
+      if (accessibleOrgs.length === 1) {
+        setForm((f) =>
+          f.organization_id ? f : { ...f, organization_id: accessibleOrgs[0].id }
+        )
+      }
     }
 
     loadUsers()
   }, [])
+
+  const selectedOrg = orgs.find((o) => o.id === form.organization_id) ?? null
+
+  // Assignable users are limited to the selected organization's domain
+  const orgUsers = selectedOrg
+    ? users.filter((u) => extractOrgDomain(u.email) === selectedOrg.domain)
+    : users
+
+  const handleOrgChange = (orgId: string) => {
+    setForm((f) => ({ ...f, organization_id: orgId }))
+    const org = orgs.find((o) => o.id === orgId)
+    if (selectedUser && org && extractOrgDomain(selectedUser.email) !== org.domain) {
+      setSelectedUser(null)
+    }
+  }
+
+  const handleUserSelect = (u: User) => {
+    setSelectedUser(u)
+    setOpenAssign(false)
+    // No organization chosen yet → infer it from the user's email domain
+    if (!form.organization_id) {
+      const org = orgs.find((o) => o.domain === extractOrgDomain(u.email))
+      if (org) setForm((f) => ({ ...f, organization_id: org.id }))
+    }
+  }
 
   /* ---------------- SAVE ASSIGNMENT ---------------- */
   const saveAssignment = async (
@@ -151,6 +197,12 @@ export default function AssetForm({
 
   /* ---------------- SUBMIT ---------------- */
   const handleSubmit = async () => {
+    if (orgs.length > 0 && !form.organization_id) {
+      toast.error("Please select an organization")
+      setActiveTab("basic")
+      return
+    }
+
     if (!selectedUser) {
       toast.error("Please assign this asset to a user")
       setActiveTab("assign")
@@ -168,6 +220,7 @@ export default function AssetForm({
       const { data: asset, error } = await supabase
         .from("assets")
         .insert({
+          organization_id: form.organization_id || null,
           asset_code: form.asset_code,
           asset_type: form.asset_type,
           model: form.model,
@@ -191,6 +244,7 @@ export default function AssetForm({
       const { error } = await supabase
         .from("assets")
         .update({
+          organization_id: form.organization_id || null,
           asset_code: form.asset_code,
           asset_type: form.asset_type,
           model: form.model,
@@ -259,6 +313,25 @@ export default function AssetForm({
 
         {/* BASIC */}
         <TabsContent value="basic" className="mt-4 grid md:grid-cols-2 gap-4">
+          <div className="col-span-full">
+            <Label className="mb-1.5 block">Organization</Label>
+            <Select
+              value={form.organization_id || undefined}
+              onValueChange={handleOrgChange}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select organization" />
+              </SelectTrigger>
+              <SelectContent>
+                {orgs.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name} ({o.domain})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {[
             ["asset_code", "Asset Code"],
             ["asset_type", "Asset Type"],
@@ -363,7 +436,14 @@ export default function AssetForm({
 
         {/* ASSIGN */}
         <TabsContent value="assign" className="mt-4 space-y-4">
-          <Label>Assign to User</Label>
+          <div>
+            <Label>Assign to User</Label>
+            <p className="text-sm text-muted-foreground mt-1">
+              {selectedOrg
+                ? `Showing users from ${selectedOrg.name} (${orgUsers.length})`
+                : "Select an organization in Asset Basics to narrow this list"}
+            </p>
+          </div>
 
           <Popover open={openAssign} onOpenChange={setOpenAssign}>
             <PopoverTrigger asChild>
@@ -377,14 +457,11 @@ export default function AssetForm({
                 <CommandInput placeholder="Search email..." />
                 <CommandEmpty>No user found</CommandEmpty>
                 <CommandGroup>
-                  {users.map((u) => (
+                  {orgUsers.map((u) => (
                     <CommandItem
                       key={u.id}
                       value={u.email}
-                      onSelect={() => {
-                        setSelectedUser(u)
-                        setOpenAssign(false)
-                      }}
+                      onSelect={() => handleUserSelect(u)}
                     >
                       {u.email}
                     </CommandItem>
