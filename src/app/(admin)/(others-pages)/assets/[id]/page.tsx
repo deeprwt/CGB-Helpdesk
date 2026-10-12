@@ -72,23 +72,22 @@ export default function AssetDetailsPage() {
       setLoading(true)
 
       /* 1️⃣ ASSET */
+      // "*" keeps this working even before organization_id exists
       const { data: asset } = await supabase
         .from("assets")
-        .select(`
-          id,
-          asset_code,
-          asset_type,
-          status,
-          location,
-          model,
-          department,
-          room,
-          purchase_date,
-          warranty_expiry,
-          organization:organization_id (name, domain)
-        `)
+        .select("*")
         .eq("id", id)
         .single()
+
+      let organization: Asset["organization"] = null
+      if (asset?.organization_id) {
+        const { data: org } = await supabase
+          .from("organizations")
+          .select("name, domain")
+          .eq("id", asset.organization_id)
+          .single()
+        organization = org ?? null
+      }
 
       /* 2️⃣ DETAILS */
       const { data: details } = await supabase
@@ -131,7 +130,7 @@ export default function AssetDetailsPage() {
           isCurrent: a.returned_at === null,
         })) ?? []
 
-      setAsset((asset as unknown as Asset) ?? null)
+      setAsset(asset ? { ...asset, organization } : null)
       setDetails(details ?? [])
       setAssignments(mappedAssignments)
       setLoading(false)

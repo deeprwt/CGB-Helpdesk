@@ -5,7 +5,6 @@ import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabaseClient"
 import {
   getUserAccessibleDomains,
-  getUserAccessibleOrganizations,
   buildEmailDomainFilter,
   extractOrgDomain,
   type Organization,
@@ -199,17 +198,15 @@ export default function AssetsPage() {
 
     if (!currentUser) { setLoading(false); return }
     const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
-    const role = profile?.role ?? "user"
-    const [domains, accessibleOrgs] = await Promise.all([
-      getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", role),
-      getUserAccessibleOrganizations(supabase, currentUser.id, currentUser.email ?? "", role),
-    ])
+    const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
 
-    const [{ data: assets }, { data: assignments }, { data: users }, { data: allOrgs }] =
+    const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }] =
       await Promise.all([
+        // "*" keeps the list working even before organization_id exists
+        // (supabase/migration_asset_organization.sql not yet run)
         supabase
           .from("assets")
-          .select("id, asset_code, asset_type, model, status, location, department, warranty_expiry, created_at, organization_id")
+          .select("*")
           .order("created_at", { ascending: false }),
 
         supabase
@@ -226,6 +223,10 @@ export default function AssetsPage() {
         supabase.from("organizations").select("id, name, domain").order("name"),
       ])
 
+    if (assetsError) {
+      toast.error(`Failed to load assets: ${assetsError.message}`)
+    }
+
     const userMap = new Map(
       (users ?? []).map((u) => [u.id, u.email])
     )
@@ -238,22 +239,13 @@ export default function AssetsPage() {
         )
       })
 
-    // Non-superadmins only see assets of organizations they can access
-    // (assets without an organization yet stay visible)
-    const accessibleOrgIds = new Set(accessibleOrgs.map((o) => o.id))
-
-    const rows: AssetRow[] = (assets ?? [])
-      .filter(
-        (a) =>
-          role === "superadmin" ||
-          !a.organization_id ||
-          accessibleOrgIds.has(a.organization_id)
-      )
-      .map((a) => ({
-        ...a,
-        assigned: assignmentMap.has(a.id),
-        assigned_email: assignmentMap.get(a.id) ?? null,
-      }))
+    // All assets are listed; organization is only used as a filter
+    const rows: AssetRow[] = ((assets ?? []) as Asset[]).map((a) => ({
+      ...a,
+      organization_id: a.organization_id ?? null,
+      assigned: assignmentMap.has(a.id),
+      assigned_email: assignmentMap.get(a.id) ?? null,
+    }))
 
     setOrgs((allOrgs ?? []) as Organization[])
     setAssets(rows)
@@ -578,7 +570,7 @@ export default function AssetsPage() {
       const { data: asset } = await supabase
         .from("assets")
         .insert({
-          organization_id: org?.id ?? null,
+          ...(org ? { organization_id: org.id } : {}),
           asset_code: r.asset_code,
           asset_type: r.asset_type,
           model: r.model ?? "",

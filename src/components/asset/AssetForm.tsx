@@ -139,13 +139,6 @@ export default function AssetForm({
 
       setUsers(data ?? [])
       setOrgs(accessibleOrgs)
-
-      // Only one organization available → preselect it
-      if (accessibleOrgs.length === 1) {
-        setForm((f) =>
-          f.organization_id ? f : { ...f, organization_id: accessibleOrgs[0].id }
-        )
-      }
     }
 
     loadUsers()
@@ -169,11 +162,6 @@ export default function AssetForm({
   const handleUserSelect = (u: User) => {
     setSelectedUser(u)
     setOpenAssign(false)
-    // No organization chosen yet → infer it from the user's email domain
-    if (!form.organization_id) {
-      const org = orgs.find((o) => o.domain === extractOrgDomain(u.email))
-      if (org) setForm((f) => ({ ...f, organization_id: org.id }))
-    }
   }
 
   /* ---------------- SAVE ASSIGNMENT ---------------- */
@@ -197,12 +185,6 @@ export default function AssetForm({
 
   /* ---------------- SUBMIT ---------------- */
   const handleSubmit = async () => {
-    if (orgs.length > 0 && !form.organization_id) {
-      toast.error("Please select an organization")
-      setActiveTab("basic")
-      return
-    }
-
     if (!selectedUser) {
       toast.error("Please assign this asset to a user")
       setActiveTab("assign")
@@ -220,7 +202,7 @@ export default function AssetForm({
       const { data: asset, error } = await supabase
         .from("assets")
         .insert({
-          organization_id: form.organization_id || null,
+          ...(form.organization_id ? { organization_id: form.organization_id } : {}),
           asset_code: form.asset_code,
           asset_type: form.asset_type,
           model: form.model,
@@ -244,7 +226,7 @@ export default function AssetForm({
       const { error } = await supabase
         .from("assets")
         .update({
-          organization_id: form.organization_id || null,
+          ...(form.organization_id ? { organization_id: form.organization_id } : {}),
           asset_code: form.asset_code,
           asset_type: form.asset_type,
           model: form.model,
@@ -314,7 +296,7 @@ export default function AssetForm({
         {/* BASIC */}
         <TabsContent value="basic" className="mt-4 grid md:grid-cols-2 gap-4">
           <div className="col-span-full">
-            <Label className="mb-1.5 block">Organization</Label>
+            <Label className="mb-1.5 block">Organization (optional)</Label>
             <Select
               value={form.organization_id || undefined}
               onValueChange={handleOrgChange}
