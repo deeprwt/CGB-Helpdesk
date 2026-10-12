@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { CheckCircle2, XCircle, Loader2, Clock } from "lucide-react"
@@ -8,7 +8,38 @@ import { Button } from "@/components/ui/button"
 
 type Status = "loading" | "success" | "already_verified" | "expired" | "error"
 
+// useSearchParams() needs a Suspense boundary so the page can be prerendered
 export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<VerifyEmailShell><VerifyingState /></VerifyEmailShell>}>
+      <VerifyEmailContent />
+    </Suspense>
+  )
+}
+
+function VerifyEmailShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col flex-1 lg:w-1/2 w-full items-center justify-center px-6">
+      <div className="w-full max-w-md text-center">{children}</div>
+    </div>
+  )
+}
+
+function VerifyingState() {
+  return (
+    <div className="space-y-4">
+      <Loader2 className="h-16 w-16 text-blue-500 animate-spin mx-auto" />
+      <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
+        Verifying your email...
+      </h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Please wait while we verify your email address.
+      </p>
+    </div>
+  )
+}
+
+function VerifyEmailContent() {
   const searchParams = useSearchParams()
   const token = searchParams.get("token")
   const uid = searchParams.get("uid")
@@ -49,92 +80,80 @@ export default function VerifyEmailPage() {
   }, [token, uid])
 
   return (
-    <div className="flex flex-col flex-1 lg:w-1/2 w-full items-center justify-center px-6">
-      <div className="w-full max-w-md text-center">
-        {status === "loading" && (
-          <div className="space-y-4">
-            <Loader2 className="h-16 w-16 text-blue-500 animate-spin mx-auto" />
-            <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
-              Verifying your email...
-            </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Please wait while we verify your email address.
-            </p>
-          </div>
-        )}
+    <VerifyEmailShell>
+      {status === "loading" && <VerifyingState />}
 
-        {status === "success" && (
-          <div className="space-y-4">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-              <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Email Verified!
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {message}
-            </p>
-            <Link href="/signin">
-              <Button className="mt-4 w-full">Go to Sign In</Button>
-            </Link>
+      {status === "success" && (
+        <div className="space-y-4">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
+            <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
+            Email Verified!
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {message}
+          </p>
+          <Link href="/signin">
+            <Button className="mt-4 w-full">Go to Sign In</Button>
+          </Link>
+        </div>
+      )}
 
-        {status === "already_verified" && (
-          <div className="space-y-4">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-              <CheckCircle2 className="h-10 w-10 text-blue-600 dark:text-blue-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Already Verified
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {message}
-            </p>
-            <Link href="/signin">
-              <Button className="mt-4 w-full">Go to Sign In</Button>
-            </Link>
+      {status === "already_verified" && (
+        <div className="space-y-4">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
+            <CheckCircle2 className="h-10 w-10 text-blue-600 dark:text-blue-400" />
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
+            Already Verified
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {message}
+          </p>
+          <Link href="/signin">
+            <Button className="mt-4 w-full">Go to Sign In</Button>
+          </Link>
+        </div>
+      )}
 
-        {status === "expired" && (
-          <div className="space-y-4">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
-              <Clock className="h-10 w-10 text-amber-600 dark:text-amber-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Link Expired
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {message}
-            </p>
-            <Link href="/signin">
-              <Button className="mt-4 w-full" variant="outline">
-                Go to Sign In to Resend
-              </Button>
-            </Link>
+      {status === "expired" && (
+        <div className="space-y-4">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+            <Clock className="h-10 w-10 text-amber-600 dark:text-amber-400" />
           </div>
-        )}
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
+            Link Expired
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {message}
+          </p>
+          <Link href="/signin">
+            <Button className="mt-4 w-full" variant="outline">
+              Go to Sign In to Resend
+            </Button>
+          </Link>
+        </div>
+      )}
 
-        {status === "error" && (
-          <div className="space-y-4">
-            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-              <XCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-              Verification Failed
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {message}
-            </p>
-            <Link href="/signin">
-              <Button className="mt-4 w-full" variant="outline">
-                Go to Sign In
-              </Button>
-            </Link>
+      {status === "error" && (
+        <div className="space-y-4">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+            <XCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
           </div>
-        )}
-      </div>
-    </div>
+          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
+            Verification Failed
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {message}
+          </p>
+          <Link href="/signin">
+            <Button className="mt-4 w-full" variant="outline">
+              Go to Sign In
+            </Button>
+          </Link>
+        </div>
+      )}
+    </VerifyEmailShell>
   )
 }
