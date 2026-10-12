@@ -1,21 +1,18 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Badge } from "@/components/ui/badge"
-import { Eye } from "lucide-react"
+import type { ColumnDef } from "@tanstack/react-table"
+import { Eye, Plus, Ticket as TicketIcon } from "lucide-react"
+import { DataTable } from "@/components/ui/data-table"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { StatusBadge } from "@/components/common/status-badge"
 import { supabase } from "@/lib/supabaseClient"
-import { STATUS_STYLE } from "@/lib/ticket-utils"
+import { STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
+import { getInitials } from "@/hooks/useCurrentUser"
 
 
 type Ticket = {
@@ -42,11 +39,6 @@ function timeAgo(date: string) {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`
   return `${Math.floor(seconds / 86400)} days ago`
 }
-
-/* -----------------------------------
-   Status → Badge Variant
------------------------------------ */
-
 
 export default function UserLatestTickets() {
   const router = useRouter()
@@ -89,75 +81,135 @@ export default function UserLatestTickets() {
     loadTickets()
   }, [])
 
+  const columns: ColumnDef<Ticket>[] = [
+    {
+      accessorKey: "id",
+      header: "ID",
+      cell: ({ row }) => (
+        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10">
+          {row.original.id.slice(0, 8).toUpperCase()}
+        </span>
+      ),
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "subject",
+      header: "Subject",
+      cell: ({ row }) => (
+        <span
+          title={row.original.subject}
+          className="block max-w-[280px] truncate font-medium text-gray-900 dark:text-white"
+        >
+          {row.original.subject}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "location",
+      header: "Location",
+      cell: ({ row }) => (
+        <span className="text-gray-500 dark:text-gray-400">{row.original.location ?? "-"}</span>
+      ),
+    },
+    {
+      accessorKey: "requester_name",
+      header: "Requester",
+      cell: ({ row }) =>
+        row.original.requester_name ? (
+          <div className="flex items-center gap-2.5">
+            <Avatar className="size-7">
+              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[11px] font-semibold text-white">
+                {getInitials(row.original.requester_name)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
+              {row.original.requester_name}
+            </span>
+          </div>
+        ) : (
+          <span className="text-gray-500 dark:text-gray-400">-</span>
+        ),
+    },
+    {
+      accessorKey: "created_at",
+      header: "Created",
+      cell: ({ row }) => (
+        <span className="text-gray-500 dark:text-gray-400">{timeAgo(row.original.created_at)}</span>
+      ),
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <StatusBadge tone={STATUS_TONE[row.original.status] ?? "gray"} dot>
+          {statusLabel(row.original.status)}
+        </StatusBadge>
+      ),
+    },
+    {
+      accessorKey: "category",
+      header: "Category",
+      cell: ({ row }) => (
+        <span className="text-gray-600 dark:text-gray-300">{row.original.category ?? "-"}</span>
+      ),
+    },
+    {
+      accessorKey: "sub_category",
+      header: "Sub-Category",
+      cell: ({ row }) => (
+        <span className="text-gray-600 dark:text-gray-300">{row.original.sub_category ?? "-"}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      enableGlobalFilter: false,
+      cell: ({ row }) => (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="View ticket"
+              className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+              onClick={() => router.push(`/ticket/${row.original.id}`)}
+            >
+              <Eye />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>View ticket</TooltipContent>
+        </Tooltip>
+      ),
+      meta: { className: "text-right", headerClassName: "text-right" },
+    },
+  ]
+
   return (
-    <Card className="p-6">
-      <h3 className="text-lg font-semibold mb-4">Latest Tickets</h3>
-
-      {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      ) : tickets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No tickets found.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead>Requester</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Sub-Category</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {tickets.map((ticket) => (
-                <TableRow key={ticket.id}>
-                  <TableCell className="font-medium">
-                    {ticket.id.slice(0, 8).toUpperCase()}
-                  </TableCell>
-
-                  <TableCell>{ticket.subject}</TableCell>
-                  <TableCell>{ticket.location ?? "-"}</TableCell>
-                  <TableCell>{ticket.requester_name ?? "-"}</TableCell>
-
-                  <TableCell className="text-muted-foreground">
-                    {timeAgo(ticket.created_at)}
-                  </TableCell>
-
-                  <TableCell>
-                    <Badge className={STATUS_STYLE[ticket.status]}>
-                      {ticket.status.replace("_", " ").toUpperCase()}
-                    </Badge>
-
-                  </TableCell>
-
-                  <TableCell>{ticket.category ?? "-"}</TableCell>
-                  <TableCell>{ticket.sub_category ?? "-"}</TableCell>
-
-                  <TableCell className="text-right">
-                    <button
-                      onClick={() => router.push(`/ticket/${ticket.id}`)}
-                      className="inline-flex items-center justify-center rounded-md p-2 hover:bg-muted"
-                      title="View Ticket"
-                    >
-                      <Eye className="w-5 h-5" />
-                    </button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-    </Card>
+    <DataTable
+      columns={columns}
+      data={tickets}
+      loading={loading}
+      getRowId={(t) => t.id}
+      title="Latest Tickets"
+      description="Your most recent support requests."
+      searchable
+      searchPlaceholder="Search tickets…"
+      pageSize={10}
+      entityName="tickets"
+      emptyIcon={TicketIcon}
+      emptyTitle="No tickets found."
+      emptyDescription="Tickets you raise will appear here."
+      emptyAction={
+        <Button variant="gradient" size="sm" asChild>
+          <Link href="/create-ticket">
+            <Plus />
+            New Ticket
+          </Link>
+        </Button>
+      }
+      onRowClick={(t) => router.push(`/ticket/${t.id}`)}
+    />
   )
 }

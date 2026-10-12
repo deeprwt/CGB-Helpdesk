@@ -3,13 +3,38 @@
 import * as React from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import { ChevronLeft, Eye, EyeOff } from "lucide-react"
+import {
+  ChevronLeft,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Lock,
+  LogIn,
+  Mail,
+  MailWarning,
+} from "lucide-react"
 // import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { toast } from "sonner"
+
+const inputClass =
+  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-indigo-400 focus-visible:ring-indigo-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+
+const leadingIconClass =
+  "pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500"
 
 export default function SignInForm() {
   const [showPassword, setShowPassword] = React.useState(false)
@@ -125,175 +150,249 @@ export default function SignInForm() {
   // }
 
   return (
-    <div className="flex flex-col flex-1 lg:w-1/2 w-full">
-      <div className="w-full max-w-md sm:pt-10 mx-auto mb-5">
-        <Link
-          href="/"
-          className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+    <div className="flex w-full flex-1 flex-col overflow-y-auto no-scrollbar lg:w-1/2">
+      <div className="mx-auto mb-5 w-full max-w-md sm:pt-10">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="-ml-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to dashboard
-        </Link>
+          <Link href="/">
+            <ChevronLeft />
+            Back to dashboard
+          </Link>
+        </Button>
       </div>
 
-      <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
-        <div className="mb-5 sm:mb-8">
-          <h1 className="mb-2 font-semibold text-gray-800 text-title-sm dark:text-white/90 sm:text-title-md">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center pb-10">
+        <div className="mb-8">
+          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-500/25">
+            <LogIn className="h-5 w-5" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
             Sign In
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Enter your email and password to sign in!
           </p>
         </div>
-{/*
+        {/*
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
-          <Button variant="secondary" className="gap-3 py-3" onClick={signInWithGoogle}>
+          <Button type="button" variant="outline" className="h-12" onClick={signInWithGoogle}>
             Sign in with Google
           </Button>
-          <Button variant="secondary" className="gap-3 py-3">
+          <Button type="button" variant="outline" className="h-12">
             Sign in with X
           </Button>
         </div>
 
         <div className="relative py-3 sm:py-5">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200 dark:border-gray-800" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="p-2 text-gray-400 bg-white dark:bg-gray-900 sm:px-5 sm:py-2">
-              Or
-            </span>
-          </div>
+          <Separator />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-sm text-gray-400 dark:bg-gray-900">
+            Or
+          </span>
         </div> */}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <Label>Email *</Label>
-            <Input
-              type="email"
-              placeholder="info@gmail.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-
-          <div>
-            <Label>Password *</Label>
-            <div className="relative">
-              <Input
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <span
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute z-30 -translate-y-1/2 cursor-pointer right-4 top-1/2"
-              >
-                {showPassword ? <Eye /> : <EyeOff />}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Checkbox checked={remember} onCheckedChange={(v) => setRemember(Boolean(v))} />
-              <span className="block font-normal text-gray-700 text-theme-sm dark:text-gray-400">
-                Keep me logged in
-              </span>
-            </div>
-            <Button
-              type="button"
-              onClick={() => setForgotOpen(true)}
-              variant="link"
-            >
-              Forgot password?
-            </Button>
-          </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-
-          {/* Verification required banner */}
-          {needsVerification && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-              <div className="flex items-start gap-3">
-                <span className="text-xl">📧</span>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                    Please verify your email before logging in.
-                  </p>
-                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                    Check your inbox for a verification link. If you didn&apos;t
-                    receive it, click below to resend.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="mt-3 border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                    onClick={handleResendVerification}
-                    disabled={resending}
-                  >
-                    {resending ? "Sending..." : "Resend Verification Email"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <Button className="w-full" size="sm" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </Button>
-        </form>
-
-        <div className="mt-5">
-          <p className="text-sm font-normal text-center text-gray-700 dark:text-gray-400 sm:text-start">
-            Don&apos;t have an account?{" "}
-            <Link href="/signup" className="text-brand-500 hover:text-brand-600">
-              Sign Up
-            </Link>
-          </p>
-        </div>
-      </div>
-      {forgotOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md p-6 bg-white rounded-lg dark:bg-gray-900">
-            <h2 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white">
-              Reset Password
-            </h2>
-            <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-              Enter your email and we&apos;ll send you a reset link.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <Label>Email</Label>
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="signin-email" required>
+                Email
+              </FieldLabel>
+              <div className="relative">
+                <Mail className={leadingIconClass} />
                 <Input
+                  id="signin-email"
                   type="email"
+                  autoComplete="email"
                   placeholder="info@gmail.com"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={inputClass}
+                  required
                 />
               </div>
+            </Field>
 
-              <div className="flex justify-end gap-3">
+            <Field>
+              <FieldLabel htmlFor="signin-password" required>
+                Password
+              </FieldLabel>
+              <div className="relative">
+                <Lock className={leadingIconClass} />
+                <Input
+                  id="signin-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`${inputClass} pr-12`}
+                  required
+                />
                 <Button
-                  variant="secondary"
-                  onClick={() => setForgotOpen(false)}
-                  disabled={forgotLoading}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-300"
                 >
-                  Cancel
-                </Button>
-                <Button onClick={handleForgotPassword} disabled={forgotLoading}>
-                  {forgotLoading ? "Sending..." : "Send Link"}
+                  {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
                 </Button>
               </div>
+            </Field>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Checkbox
+                  id="signin-remember"
+                  checked={remember}
+                  onCheckedChange={(v) => setRemember(Boolean(v))}
+                />
+                <Label
+                  htmlFor="signin-remember"
+                  className="mb-0 cursor-pointer font-normal text-gray-700 dark:text-gray-400"
+                >
+                  Keep me logged in
+                </Label>
+              </div>
+              <Button
+                type="button"
+                variant="link"
+                onClick={() => setForgotOpen(true)}
+                className="h-auto p-0 font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+              >
+                Forgot password?
+              </Button>
             </div>
-          </div>
-        </div>
-      )}
+
+            {error && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400"
+              >
+                {error}
+              </div>
+            )}
+
+            {/* Verification required banner */}
+            {needsVerification && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/20">
+                    <MailWarning className="h-4 w-4" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                      Please verify your email before logging in.
+                    </p>
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                      Check your inbox for a verification link. If you didn&apos;t
+                      receive it, click below to resend.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-3 border-amber-300 bg-transparent text-amber-800 hover:bg-amber-100 hover:text-amber-900 dark:border-amber-700 dark:bg-transparent dark:text-amber-300 dark:hover:bg-amber-900/40"
+                      onClick={handleResendVerification}
+                      disabled={resending}
+                    >
+                      {resending && <Loader2 className="animate-spin" />}
+                      {resending ? "Sending..." : "Resend Verification Email"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              variant="gradient"
+              className="h-12 w-full font-semibold"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                "Sign in"
+              )}
+            </Button>
+          </FieldGroup>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          Don&apos;t have an account?{" "}
+          <Button
+            asChild
+            variant="link"
+            className="h-auto p-0 font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+            <Link href="/signup">Sign Up</Link>
+          </Button>
+        </p>
+      </div>
+
+      <Dialog
+        open={forgotOpen}
+        onOpenChange={(open) => {
+          // Mirror the old modal: it couldn't be dismissed while the request was in flight
+          if (!forgotLoading) setForgotOpen(open)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <span className="mx-auto mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 sm:mx-0 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+              <KeyRound className="h-5 w-5" />
+            </span>
+            <DialogTitle className="text-gray-900 dark:text-white">Reset Password</DialogTitle>
+            <DialogDescription className="text-gray-500 dark:text-gray-400">
+              Enter your email and we&apos;ll send you a reset link.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Field>
+            <FieldLabel htmlFor="forgot-email">Email</FieldLabel>
+            <div className="relative">
+              <Mail className={leadingIconClass} />
+              <Input
+                id="forgot-email"
+                type="email"
+                autoComplete="email"
+                placeholder="info@gmail.com"
+                value={forgotEmail}
+                onChange={(e) => setForgotEmail(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </Field>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setForgotOpen(false)}
+              disabled={forgotLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="gradient"
+              onClick={handleForgotPassword}
+              disabled={forgotLoading}
+            >
+              {forgotLoading && <Loader2 className="animate-spin" />}
+              {forgotLoading ? "Sending..." : "Send Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -3,10 +3,38 @@
 import { Suspense, useEffect, useState, type ReactNode } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { CheckCircle2, XCircle, Loader2, Clock } from "lucide-react"
+import {
+  CheckCircle2,
+  Clock,
+  Loader2,
+  MailCheck,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 
 type Status = "loading" | "success" | "already_verified" | "expired" | "error"
+
+type Tone = "indigo" | "emerald" | "sky" | "amber" | "red"
+
+const TONE_CHIP: Record<Tone, string> = {
+  indigo:
+    "bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20",
+  emerald:
+    "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20",
+  sky: "bg-sky-50 text-sky-600 ring-sky-100 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/20",
+  amber:
+    "bg-amber-50 text-amber-600 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/20",
+  red: "bg-red-50 text-red-600 ring-red-100 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/20",
+}
 
 // useSearchParams() needs a Suspense boundary so the page can be prerendered
 export default function VerifyEmailPage() {
@@ -19,23 +47,59 @@ export default function VerifyEmailPage() {
 
 function VerifyEmailShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col flex-1 lg:w-1/2 w-full items-center justify-center px-6">
-      <div className="w-full max-w-md text-center">{children}</div>
+    <div className="flex w-full flex-1 flex-col items-center justify-center px-0 sm:px-6 lg:w-1/2">
+      {children}
     </div>
+  )
+}
+
+function StatusCard({
+  icon: Icon,
+  tone,
+  title,
+  description,
+  spin,
+  action,
+}: {
+  icon: LucideIcon
+  tone: Tone
+  title: ReactNode
+  description: ReactNode
+  spin?: boolean
+  action?: ReactNode
+}) {
+  return (
+    <Card className="w-full max-w-md gap-0 py-8">
+      <CardHeader className="justify-items-center gap-0 text-center">
+        <span
+          className={cn(
+            "flex h-16 w-16 items-center justify-center rounded-2xl ring-1",
+            TONE_CHIP[tone]
+          )}
+        >
+          <Icon className={cn("h-8 w-8", spin && "animate-spin")} />
+        </span>
+        <CardTitle className="mt-5 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+          {title}
+        </CardTitle>
+        <CardDescription className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+          {description}
+        </CardDescription>
+      </CardHeader>
+      {action && <CardFooter className="mt-6">{action}</CardFooter>}
+    </Card>
   )
 }
 
 function VerifyingState() {
   return (
-    <div className="space-y-4">
-      <Loader2 className="h-16 w-16 text-blue-500 animate-spin mx-auto" />
-      <h1 className="text-xl font-semibold text-gray-800 dark:text-white">
-        Verifying your email...
-      </h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
-        Please wait while we verify your email address.
-      </p>
-    </div>
+    <StatusCard
+      icon={Loader2}
+      spin
+      tone="indigo"
+      title="Verifying your email..."
+      description="Please wait while we verify your email address."
+    />
   )
 }
 
@@ -84,75 +148,59 @@ function VerifyEmailContent() {
       {status === "loading" && <VerifyingState />}
 
       {status === "success" && (
-        <div className="space-y-4">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-            <CheckCircle2 className="h-10 w-10 text-green-600 dark:text-green-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            Email Verified!
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {message}
-          </p>
-          <Link href="/signin">
-            <Button className="mt-4 w-full">Go to Sign In</Button>
-          </Link>
-        </div>
+        <StatusCard
+          icon={MailCheck}
+          tone="emerald"
+          title="Email Verified!"
+          description={message}
+          action={
+            <Button asChild variant="gradient" className="w-full">
+              <Link href="/signin">Go to Sign In</Link>
+            </Button>
+          }
+        />
       )}
 
       {status === "already_verified" && (
-        <div className="space-y-4">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-            <CheckCircle2 className="h-10 w-10 text-blue-600 dark:text-blue-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            Already Verified
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {message}
-          </p>
-          <Link href="/signin">
-            <Button className="mt-4 w-full">Go to Sign In</Button>
-          </Link>
-        </div>
+        <StatusCard
+          icon={CheckCircle2}
+          tone="sky"
+          title="Already Verified"
+          description={message}
+          action={
+            <Button asChild variant="gradient" className="w-full">
+              <Link href="/signin">Go to Sign In</Link>
+            </Button>
+          }
+        />
       )}
 
       {status === "expired" && (
-        <div className="space-y-4">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
-            <Clock className="h-10 w-10 text-amber-600 dark:text-amber-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            Link Expired
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {message}
-          </p>
-          <Link href="/signin">
-            <Button className="mt-4 w-full" variant="outline">
-              Go to Sign In to Resend
+        <StatusCard
+          icon={Clock}
+          tone="amber"
+          title="Link Expired"
+          description={message}
+          action={
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/signin">Go to Sign In to Resend</Link>
             </Button>
-          </Link>
-        </div>
+          }
+        />
       )}
 
       {status === "error" && (
-        <div className="space-y-4">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
-            <XCircle className="h-10 w-10 text-red-600 dark:text-red-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
-            Verification Failed
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {message}
-          </p>
-          <Link href="/signin">
-            <Button className="mt-4 w-full" variant="outline">
-              Go to Sign In
+        <StatusCard
+          icon={XCircle}
+          tone="red"
+          title="Verification Failed"
+          description={message}
+          action={
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/signin">Go to Sign In</Link>
             </Button>
-          </Link>
-        </div>
+          }
+        />
       )}
     </VerifyEmailShell>
   )

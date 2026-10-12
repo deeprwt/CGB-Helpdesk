@@ -7,6 +7,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/common/page-header";
+import { EmptyState } from "@/components/common/empty-state";
+import { StatusBadge, type BadgeTone } from "@/components/common/status-badge";
 import {
   Bell,
   MessageSquare,
@@ -15,6 +19,8 @@ import {
   PauseCircle,
   RefreshCw,
   CheckCheck,
+  ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -63,28 +69,41 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-const TYPE_ICON: Record<string, React.ReactNode> = {
-  message: <MessageSquare className="h-4 w-4" />,
-  acquired: <UserCheck className="h-4 w-4" />,
-  closed: <XCircle className="h-4 w-4" />,
-  hold: <PauseCircle className="h-4 w-4" />,
-  status_changed: <RefreshCw className="h-4 w-4" />,
-};
-
-const TYPE_COLOR: Record<string, string> = {
-  message: "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300",
-  acquired: "bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300",
-  closed: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
-  hold: "bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300",
-  status_changed: "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300",
-};
-
-const TYPE_LABEL: Record<string, string> = {
-  message: "Message",
-  acquired: "Acquired",
-  closed: "Closed",
-  hold: "On Hold",
-  status_changed: "Status",
+/** Notification type → icon, chip colour, badge tone and label */
+const TYPE_META: Record<
+  string,
+  { icon: LucideIcon; chip: string; tone: BadgeTone; label: string }
+> = {
+  message: {
+    icon: MessageSquare,
+    chip: "bg-blue-50 text-blue-600 ring-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/20",
+    tone: "blue",
+    label: "Message",
+  },
+  acquired: {
+    icon: UserCheck,
+    chip: "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20",
+    tone: "emerald",
+    label: "Acquired",
+  },
+  closed: {
+    icon: XCircle,
+    chip: "bg-gray-100 text-gray-600 ring-gray-200 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10",
+    tone: "gray",
+    label: "Closed",
+  },
+  hold: {
+    icon: PauseCircle,
+    chip: "bg-orange-50 text-orange-600 ring-orange-100 dark:bg-orange-500/15 dark:text-orange-300 dark:ring-orange-500/20",
+    tone: "orange",
+    label: "On Hold",
+  },
+  status_changed: {
+    icon: RefreshCw,
+    chip: "bg-violet-50 text-violet-600 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/20",
+    tone: "violet",
+    label: "Status",
+  },
 };
 
 type FilterTab = "all" | "unread" | "message" | "acquired" | "closed" | "hold";
@@ -192,9 +211,9 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
-  const TABS: { key: FilterTab; label: string }[] = [
+  const TABS: { key: FilterTab; label: string; count?: number }[] = [
     { key: "all", label: "All" },
-    { key: "unread", label: `Unread${unreadCount > 0 ? ` (${unreadCount})` : ""}` },
+    { key: "unread", label: "Unread", count: unreadCount },
     { key: "message", label: "Messages" },
     { key: "acquired", label: "Acquired" },
     { key: "closed", label: "Closed" },
@@ -202,136 +221,154 @@ export default function NotificationsPage() {
   ];
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Notifications</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Stay updated on your ticket activity
-          </p>
-        </div>
-
-        {unreadCount > 0 && (
-          <Button variant="outline" size="sm" onClick={markAllRead}>
-            <CheckCheck className="h-4 w-4 mr-2" />
-            Mark all read
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Notifications"
+        description="Stay updated on your ticket activity"
+        actions={
+          unreadCount > 0 && (
+            <Button variant="outline" size="sm" onClick={markAllRead}>
+              <CheckCheck className="h-4 w-4" />
+              Mark all as read
+            </Button>
+          )
+        }
+      />
 
       {/* Filter tabs */}
-      <div className="flex gap-1 flex-wrap">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-              filter === tab.key
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs value={filter} onValueChange={(v) => setFilter(v as FilterTab)}>
+        <div className="glass-scrollbar -mx-1 overflow-x-auto px-1 pb-1">
+          <TabsList className="w-max">
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab.key} value={tab.key} className="flex-none px-3">
+                {tab.label}
+                {!!tab.count && (
+                  <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[10px] font-semibold leading-4 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
+                    {tab.count}
+                  </span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+      </Tabs>
 
       {/* Content */}
       {loading ? (
-        <Card className="divide-y divide-border/50">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-start gap-3 p-4">
-              <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-3 w-1/4" />
+        <Card className="gap-0 overflow-hidden py-0">
+          <div className="border-b border-gray-100 bg-gray-50/80 px-5 py-2.5 dark:border-white/5 dark:bg-white/[0.03]">
+            <Skeleton className="h-3 w-20" />
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-white/5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-4 px-5 py-4">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/4" />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </Card>
       ) : filtered.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center py-16 gap-3">
-          <Bell className="h-10 w-10 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">No notifications found</p>
+        <Card className="py-0">
+          <EmptyState
+            icon={Bell}
+            title="No notifications found"
+            description={
+              filter === "all"
+                ? "You're all caught up. New ticket activity will show up here."
+                : "Nothing matches this filter right now."
+            }
+            className="py-16"
+          />
         </Card>
       ) : (
-        <div className="space-y-6">
+        <Card className="gap-0 overflow-hidden py-0">
           {Object.entries(grouped).map(([dateLabel, items]) => (
-            <div key={dateLabel}>
+            <section
+              key={dateLabel}
+              className="border-b border-gray-100 last:border-b-0 dark:border-white/5"
+            >
               {/* Date group heading */}
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 px-1">
-                {dateLabel}
-              </p>
+              <div className="border-b border-gray-100 bg-gray-50/80 px-5 py-2.5 dark:border-white/5 dark:bg-white/[0.03]">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  {dateLabel}
+                </p>
+              </div>
 
-              <Card className="divide-y divide-border/40 overflow-hidden">
+              <div className="divide-y divide-gray-100 dark:divide-white/5">
                 {items.map((n) => {
                   const actorName = n.actor?.full_name ?? "Someone";
                   const actorInitial = actorName[0]?.toUpperCase() ?? "?";
-                  const iconEl = TYPE_ICON[n.type] ?? TYPE_ICON.status_changed;
-                  const iconColor = TYPE_COLOR[n.type] ?? TYPE_COLOR.status_changed;
-                  const typeLabel = TYPE_LABEL[n.type] ?? "Update";
+                  const meta = TYPE_META[n.type] ?? TYPE_META.status_changed;
+                  const typeLabel = TYPE_META[n.type]?.label ?? "Update";
+                  const TypeIcon = meta.icon;
 
                   return (
                     <Link
                       key={n.id}
                       href={`/ticket/${n.ticket_id}`}
                       className={cn(
-                        "flex items-start gap-4 px-4 py-4 hover:bg-muted/50 transition-colors",
-                        !n.is_read && "bg-blue-50/50 dark:bg-blue-950/10"
+                        "group flex items-start gap-4 px-5 py-4 transition-colors hover:bg-gray-50 dark:hover:bg-white/[0.03]",
+                        !n.is_read && "bg-indigo-50/50 dark:bg-indigo-500/[0.06]"
                       )}
                     >
-                      {/* Avatar + type badge */}
-                      <div className="relative flex-shrink-0">
+                      {/* Avatar + type chip */}
+                      <div className="relative shrink-0">
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={n.actor?.avatar_url ?? undefined} />
-                          <AvatarFallback className="text-sm font-bold bg-muted">
+                          <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
                             {actorInitial}
                           </AvatarFallback>
                         </Avatar>
                         <span
                           className={cn(
-                            "absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-background",
-                            iconColor
+                            "absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-white dark:ring-gray-900",
+                            meta.chip
                           )}
                         >
-                          {iconEl}
+                          <TypeIcon className="h-3 w-3" />
                         </span>
                       </div>
 
                       {/* Text */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm leading-snug">
-                          <span className="font-semibold">{actorName}</span>{" "}
-                          <span className="text-foreground/80">{n.message}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-snug text-gray-700 dark:text-gray-300">
+                          <span className="font-semibold text-gray-900 dark:text-white">
+                            {actorName}
+                          </span>{" "}
+                          {n.message}
                         </p>
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span
-                            className={cn(
-                              "text-[10px] font-bold uppercase tracking-wide rounded-full px-1.5 py-0.5",
-                              iconColor
-                            )}
-                          >
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <StatusBadge tone={meta.tone} className="px-2 text-[10px] uppercase tracking-wide">
                             {typeLabel}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
+                          </StatusBadge>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
                             {timeAgo(n.created_at)}
                           </span>
                         </div>
                       </div>
 
-                      {/* Unread dot */}
-                      {!n.is_read && (
-                        <span className="mt-2 h-2 w-2 flex-shrink-0 rounded-full bg-blue-500" />
-                      )}
+                      {/* Unread dot / chevron */}
+                      <div className="flex shrink-0 items-center gap-2 self-center">
+                        {!n.is_read && (
+                          <>
+                            <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                            <span className="sr-only">Unread</span>
+                          </>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gray-500 dark:text-gray-600 dark:group-hover:text-gray-400" />
+                      </div>
                     </Link>
                   );
                 })}
-              </Card>
-            </div>
+              </div>
+            </section>
           ))}
-        </div>
+        </Card>
       )}
     </div>
   );

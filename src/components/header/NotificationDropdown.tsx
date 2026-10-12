@@ -164,19 +164,24 @@ export default function NotificationDropdown() {
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <Button
+          variant="outline"
+          size="icon-lg"
+          aria-label="Notifications"
+          className="relative rounded-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white"
+        >
+          <Bell className="size-5" />
 
           {/* Unread badge */}
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white leading-none">
+            <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-orange-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white dark:ring-gray-900">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-[380px] p-0 overflow-hidden">
+      <DropdownMenuContent align="end" className="w-[380px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <div className="flex items-center gap-2">

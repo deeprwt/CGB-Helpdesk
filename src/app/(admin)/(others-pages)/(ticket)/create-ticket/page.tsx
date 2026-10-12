@@ -1,7 +1,8 @@
-import PageBreadcrumb from "@/components/common/PageBreadCrumb";
-import CreateTicketForm from "@/components/tickets/CreateTicketForm";
 import { Metadata } from "next";
 import React from "react";
+
+import { PageHeader } from "@/components/common/page-header";
+import CreateTicketForm from "@/components/tickets/CreateTicketForm";
 
 export const metadata: Metadata = {
   title: "Create New Ticket | Help Desk 360° CGB Solutions ",
@@ -10,16 +11,13 @@ export const metadata: Metadata = {
 
 export default function BlankPage() {
   return (
-    <div>
-      <PageBreadcrumb pageTitle="Create Ticket" />
-      <div className="min-h-screen rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
-        <div className="mx-auto w-full max-w-[630px] text-center">
-          {/* <h3 className="mb-4 font-semibold text-gray-800 text-theme-xl dark:text-white/90 sm:text-2xl">
-            Create Ticket
-          </h3> */}
-         <CreateTicketForm />
-        </div>
-      </div>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <PageHeader
+        breadcrumbs={[{ label: "Tickets", href: "/ticket" }, { label: "New Ticket" }]}
+        title="Create Ticket"
+        description="Describe the issue and we'll route it to the right engineer."
+      />
+      <CreateTicketForm />
     </div>
   );
 }

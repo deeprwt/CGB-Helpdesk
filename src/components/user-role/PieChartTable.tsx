@@ -1,16 +1,20 @@
 "use client"
 
 import * as React from "react"
-import { Pie, PieChart } from "recharts"
+import { Label, Pie, PieChart } from "recharts"
+import { ChartPie } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 import {
   Card,
+  CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { EmptyState } from "@/components/common/empty-state"
 
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -43,12 +47,19 @@ type ChartRow = {
 
 /* ---------------- COLORS ---------------- */
 
+/* Same tones as the dashboard stat cards (indigo / sky / amber / rose / emerald) */
 const COLORS = {
-  total: "var(--chart-1)",
-  new: "var(--chart-2)",
-  open: "var(--chart-3)",
-  hold: "var(--chart-4)",
-  closed: "var(--chart-5)",
+  total: "#6366f1",
+  new: "#0ea5e9",
+  open: "#f59e0b",
+  hold: "#f43f5e",
+  closed: "#10b981",
+}
+
+const RANGE_DESCRIPTION: Record<Range, string> = {
+  weekly: "Ticket breakdown for the last 7 days",
+  monthly: "Ticket breakdown for the last month",
+  yearly: "Ticket breakdown for the last 12 months",
 }
 
 /* ---------------- CHART CONFIG ---------------- */
@@ -197,64 +208,122 @@ export function PieChartTable() {
     return null
   }
 
-  return (
-    <Card>
-      <CardHeader className="flex items-center justify-between">
-        <CardTitle>Ticket Overview</CardTitle>
+  const totalTickets = data.find((d) => d.key === "total")?.value ?? 0
+  const hasData = data.some((d) => d.value > 0)
 
-        <Select value={range} onValueChange={(v) => setRange(v as Range)}>
-          <SelectTrigger className="w-[130px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="weekly">Weekly</SelectItem>
-            <SelectItem value="monthly">Monthly</SelectItem>
-            <SelectItem value="yearly">Yearly</SelectItem>
-          </SelectContent>
-        </Select>
+  return (
+    <Card className="h-full gap-4">
+      <CardHeader>
+        <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">
+          Ticket Overview
+        </CardTitle>
+        <CardDescription className="text-gray-500 dark:text-gray-400">
+          {RANGE_DESCRIPTION[range]}
+        </CardDescription>
+        <CardAction>
+          <Select value={range} onValueChange={(v) => setRange(v as Range)}>
+            <SelectTrigger size="sm" className="w-[130px]" aria-label="Date range">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="weekly">Weekly</SelectItem>
+              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="yearly">Yearly</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardAction>
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="flex flex-1 items-center">
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-4/6" />
-            </div>
-            <Skeleton className="w-[260px] h-[260px] rounded-full mx-auto" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-            <div className="space-y-3">
-              {data.map((item) => (
-                <div key={item.key} className="flex items-center gap-3 text-sm">
-                  <span
-                    className="h-3 w-3 rounded-full"
-                    style={{ backgroundColor: item.fill }}
-                  />
-                  <span className="flex-1">{item.label}</span>
-                  <span className="font-semibold">{item.value}</span>
-                </div>
+          <div className="grid w-full grid-cols-1 items-center gap-6 md:grid-cols-2">
+            <Skeleton className="mx-auto aspect-square w-full max-w-[240px] rounded-full" />
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-11 w-full rounded-xl" />
               ))}
             </div>
+          </div>
+        ) : (
+          <div className="grid w-full grid-cols-1 items-center gap-6 md:grid-cols-2">
+            {hasData ? (
+              <ChartContainer
+                config={chartConfig}
+                className="mx-auto aspect-square w-full max-w-[240px]"
+              >
+                <PieChart>
+                  <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                  <Pie
+                    data={data}
+                    dataKey="value"
+                    nameKey="label"
+                    innerRadius="62%"
+                    outerRadius="95%"
+                    paddingAngle={2}
+                    cornerRadius={4}
+                    strokeWidth={0}
+                  >
+                    <Label
+                      content={({ viewBox }) => {
+                        if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                          return (
+                            <text
+                              x={viewBox.cx}
+                              y={viewBox.cy}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                            >
+                              <tspan
+                                x={viewBox.cx}
+                                y={viewBox.cy}
+                                className="fill-gray-900 text-3xl font-bold dark:fill-white"
+                              >
+                                {totalTickets.toLocaleString()}
+                              </tspan>
+                              <tspan
+                                x={viewBox.cx}
+                                y={(viewBox.cy || 0) + 24}
+                                className="fill-gray-500 text-xs dark:fill-gray-400"
+                              >
+                                Total tickets
+                              </tspan>
+                            </text>
+                          )
+                        }
+                        return null
+                      }}
+                    />
+                  </Pie>
+                </PieChart>
+              </ChartContainer>
+            ) : (
+              <EmptyState
+                icon={ChartPie}
+                title="No tickets yet"
+                description="No tickets in this period."
+                className="py-8"
+              />
+            )}
 
-            <ChartContainer
-              config={chartConfig}
-              className="w-[260px] h-[260px] mx-auto"
-            >
-              <PieChart width={260} height={260}>
-                <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-                <Pie
-                  data={data}
-                  dataKey="value"
-                  nameKey="label"
-                  innerRadius={70}
-                  outerRadius={110}
-                  paddingAngle={2}
-                />
-              </PieChart>
-            </ChartContainer>
+            <ul className="flex flex-col gap-2">
+              {data.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5 text-sm dark:border-white/5 dark:bg-white/[0.02]"
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: item.fill }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-gray-300">
+                    {item.label}
+                  </span>
+                  <span className="font-semibold tabular-nums text-gray-900 dark:text-white">
+                    {item.value.toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </CardContent>

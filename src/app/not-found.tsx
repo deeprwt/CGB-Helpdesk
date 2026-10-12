@@ -1,46 +1,44 @@
 import GridShape from "@/components/common/GridShape";
-import Image from "next/image";
+import { Button } from "@/components/ui/button";
+import { House, SearchX } from "lucide-react";
 import Link from "next/link";
 import React from "react";
 
 export default function NotFound() {
   return (
-    <div className="relative flex flex-col items-center justify-center min-h-screen p-6 overflow-hidden z-1">
+    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-white p-6 dark:bg-gray-900">
       <GridShape />
-      <div className="mx-auto w-full max-w-[242px] text-center sm:max-w-[472px]">
-        <h1 className="mb-8 font-bold text-gray-800 text-title-md dark:text-white/90 xl:text-title-2xl">
-          ERROR
+      {/* Soft glow blobs */}
+      <div className="pointer-events-none absolute -right-24 -top-24 -z-1 h-80 w-80 rounded-full bg-indigo-200/50 blur-3xl dark:bg-indigo-500/10" />
+      <div className="pointer-events-none absolute -bottom-28 -left-20 -z-1 h-80 w-80 rounded-full bg-purple-200/50 blur-3xl dark:bg-purple-500/10" />
+
+      <div className="mx-auto flex w-full max-w-md flex-col items-center text-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+          <SearchX className="h-3.5 w-3.5" />
+          Error
+        </span>
+
+        <h1 className="mt-6 bg-gradient-to-br from-indigo-500 via-indigo-600 to-purple-500 bg-clip-text text-8xl font-extrabold leading-none tracking-tighter text-transparent sm:text-9xl dark:from-indigo-400 dark:via-indigo-300 dark:to-purple-400">
+          404
         </h1>
 
-        <Image
-          src="/images/error/404.svg"
-          alt="404"
-          className="dark:hidden"
-          width={472}
-          height={152}
-        />
-        <Image
-          src="/images/error/404-dark.svg"
-          alt="404"
-          className="hidden dark:block"
-          width={472}
-          height={152}
-        />
-
-        <p className="mt-10 mb-6 text-base text-gray-700 dark:text-gray-400 sm:text-lg">
+        <p className="mt-6 text-lg font-semibold text-gray-900 dark:text-white">
+          Page not found
+        </p>
+        <p className="mt-2 text-sm text-gray-500 sm:text-base dark:text-gray-400">
           We can’t seem to find the page you are looking for!
         </p>
 
-        <Link
-          href="/"
-          className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-5 py-3.5 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200"
-        >
-          Back to Home Page
-        </Link>
+        <Button asChild variant="gradient" className="mt-8">
+          <Link href="/">
+            <House />
+            Back to Home
+          </Link>
+        </Button>
       </div>
       {/* <!-- Footer --> */}
-      <p className="absolute text-sm text-center text-gray-500 -translate-x-1/2 bottom-6 left-1/2 dark:text-gray-400">
-        &copy; {new Date().getFullYear()} - TailAdmin
+      <p className="absolute bottom-6 left-1/2 -translate-x-1/2 text-center text-sm text-gray-500 dark:text-gray-400">
+        &copy; {new Date().getFullYear()} - CGB Solutions
       </p>
     </div>
   );

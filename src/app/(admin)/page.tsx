@@ -1,17 +1,11 @@
 import type { Metadata } from "next";
-import { EcommerceMetrics } from "@/components/ecommerce/EcommerceMetrics";
 import React from "react";
-import MonthlyTarget from "@/components/ecommerce/MonthlyTarget";
-import MonthlySalesChart from "@/components/ecommerce/MonthlySalesChart";
-import StatisticsChart from "@/components/ecommerce/StatisticsChart";
 
-import DemographicCard from "@/components/ecommerce/DemographicCard";
+import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import TicketOverviewCards from "@/components/tickets/TicketOverviewCards";
-import UserLatestTickets from "@/components/tickets/UserLatestTickets";
 import RoleBasedTickets from "@/components/user-role/RoleBasedTickets";
 import TeammatesCard from "@/components/user-role/TeammatesCard";
 import { PieChartTable } from "@/components/user-role/PieChartTable";
-
 
 export const metadata: Metadata = {
   title:
@@ -19,50 +13,24 @@ export const metadata: Metadata = {
   description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
-export default function Ecommerce() {
+export default function Dashboard() {
   return (
-    <>
+    <div className="flex flex-col gap-6">
+      <DashboardHeader />
 
-    <div className="grid grid-cols-12 gap-4 md:gap-6">
-            <div className="col-span-12">
-            <TicketOverviewCards />
-      </div>
-            <div className="col-span-12 xl:col-span-5">
-        <TeammatesCard />
-      </div>
-      <div className="col-span-12 xl:col-span-7">
-           {/* <TeammatesCard /> */}
+      <TicketOverviewCards />
+
+      {/* Staff-only widgets: both render nothing for end users, so the row collapses */}
+      <div className="grid grid-cols-12 gap-4 md:gap-6 [&:not(:has(>div:not(:empty)))]:hidden">
+        <div className="col-span-12 empty:hidden xl:col-span-5">
+          <TeammatesCard />
+        </div>
+        <div className="col-span-12 empty:hidden xl:col-span-7">
           <PieChartTable />
-      </div>
-      <div className="col-span-12">
-        <RoleBasedTickets />
+        </div>
       </div>
 
-      {/* <div className="col-span-12 xl:col-span-7">
-          <DemographicCard />
-      </div>
-      <div className="col-span-12 space-y-6 xl:col-span-7">
-        <EcommerceMetrics />
-
-        <MonthlySalesChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <MonthlyTarget />
-      </div>
-
-      <div className="col-span-12">
-        <StatisticsChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <DemographicCard />
-      </div> */}
-
-      {/* <div className="col-span-12 xl:col-span-7">
- <DemographicCard />
-      </div> */}
+      <RoleBasedTickets />
     </div>
-    </>
   );
 }

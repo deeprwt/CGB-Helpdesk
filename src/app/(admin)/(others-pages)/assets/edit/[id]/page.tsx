@@ -9,6 +9,7 @@ import AssetForm, {
 } from "@/components/asset/AssetForm"
 import { Skeleton } from "@/components/ui/skeleton"
 import RoleGate from "@/components/auth/RoleGate"
+import { PageHeader } from "@/components/common/page-header"
 
 export default function EditAssetPage() {
     const { id } = useParams<{ id: string }>()
@@ -75,16 +76,52 @@ export default function EditAssetPage() {
         load()
     }, [id])
 
-    if (!data) return <Skeleton className="h-96 w-full" />
+    if (!data) {
+        return (
+            <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-2">
+                    <Skeleton className="h-3 w-40" />
+                    <Skeleton className="h-8 w-56" />
+                    <Skeleton className="h-4 w-72" />
+                </div>
+                <div className="grid gap-6 xl:grid-cols-3">
+                    <div className="flex flex-col gap-6 xl:col-span-2">
+                        <Skeleton className="h-96 w-full rounded-2xl" />
+                        <Skeleton className="h-72 w-full rounded-2xl" />
+                    </div>
+                    <div className="flex flex-col gap-6">
+                        <Skeleton className="h-56 w-full rounded-2xl" />
+                        <Skeleton className="h-56 w-full rounded-2xl" />
+                    </div>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
-            <AssetForm
-                mode="edit"
-                assetId={id}
-                initialData={data}
-                initialAssignedUser={assignedUser}
-            />
+            <div className="flex flex-col gap-6">
+                <PageHeader
+                    breadcrumbs={[
+                        { label: "Assets", href: "/assets" },
+                        { label: data.asset_code || "Asset", href: `/assets/${id}` },
+                        { label: "Edit" },
+                    ]}
+                    title="Edit Asset"
+                    description={
+                        data.asset_code
+                            ? `Update details, warranty and assignment for ${data.asset_code}.`
+                            : "Update details, warranty and assignment for this asset."
+                    }
+                />
+
+                <AssetForm
+                    mode="edit"
+                    assetId={id}
+                    initialData={data}
+                    initialAssignedUser={assignedUser}
+                />
+            </div>
         </RoleGate>
     )
 }

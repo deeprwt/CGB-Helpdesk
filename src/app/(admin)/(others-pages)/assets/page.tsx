@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import * as XLSX from "xlsx"
+import type { ColumnDef, RowSelectionState } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
 import {
   getUserAccessibleDomains,
@@ -10,28 +11,31 @@ import {
   type Organization,
 } from "@/lib/org"
 import { useRouter } from "next/navigation"
+import { cn } from "@/lib/utils"
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { DataTable } from "@/components/ui/data-table"
 import {
   Dialog,
+  DialogClose,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
@@ -41,13 +45,41 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  Eye,
-  Pencil,
-  Trash2,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { PageHeader } from "@/components/common/page-header"
+import {
+  StatCard,
+  StatCardSkeleton,
+  STAT_TONE_CYCLE,
+} from "@/components/common/stat-card"
+import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
+import {
+  Archive,
+  Boxes,
+  CircleCheck,
+  CloudUpload,
   Download,
-  Upload,
-  Search,
+  Eye,
+  FileSpreadsheet,
+  MapPin,
+  PackageOpen,
+  Pencil,
+  Plus,
+  ShieldAlert,
   SlidersHorizontal,
+  Trash2,
+  Upload,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -58,6 +90,98 @@ import {
   FacetFilter,
   type FacetOption,
 } from "@/components/asset/AssetFilterSidebar"
+
+/* ---------------- UI HELPERS ---------------- */
+
+const STATUS_BADGE_TONE: Record<string, BadgeTone> = {
+  in_use: "emerald",
+  spare: "amber",
+  retired: "gray",
+}
+
+const emailInitials = (email: string) =>
+  email
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase() || "?"
+
+function Dash() {
+  return <span className="text-gray-400 dark:text-gray-500">—</span>
+}
+
+function RowAction({
+  label,
+  onClick,
+  className,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          onClick={onClick}
+          className={cn("text-gray-500 dark:text-gray-400", className)}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function ExportOption({
+  id,
+  value,
+  title,
+  description,
+  count,
+  disabled,
+}: {
+  id: string
+  value: string
+  title: string
+  description: string
+  count: number
+  disabled?: boolean
+}) {
+  return (
+    <FieldLabel
+      htmlFor={id}
+      className="mb-0 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal leading-normal transition-colors hover:border-indigo-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[[data-state=checked]]:border-indigo-300 has-[[data-state=checked]]:bg-indigo-50/60 dark:border-white/10 dark:hover:border-indigo-500/30 dark:has-[[data-state=checked]]:border-indigo-500/40 dark:has-[[data-state=checked]]:bg-indigo-500/10"
+    >
+      <RadioGroupItem
+        id={id}
+        value={value}
+        disabled={disabled}
+        className="mt-0.5 text-indigo-500 data-[state=checked]:border-indigo-500 [&_svg]:fill-indigo-500"
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-sm font-medium text-gray-900 dark:text-white">
+          {title}
+        </span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          {description}
+        </span>
+      </span>
+      <StatusBadge tone="indigo" className="tabular-nums">
+        {count.toLocaleString()}
+      </StatusBadge>
+    </FieldLabel>
+  )
+}
 
 /* ---------------- TYPES ---------------- */
 
@@ -423,10 +547,10 @@ export default function AssetsPage() {
   }
 
   /* ---------------- DELETE (ROW) ---------------- */
-  const handleDeleteRow = async (id: string) => {
-    const ok = window.confirm("Delete this asset?")
-    if (!ok) return
+  // Confirmation is handled by <ConfirmDialog> below (replaces window.confirm)
+  const [deleteId, setDeleteId] = React.useState<string | null>(null)
 
+  const handleDeleteRow = async (id: string) => {
     await supabase.from("asset_assignments").delete().eq("asset_id", id)
     await supabase.from("asset_details").delete().eq("asset_id", id)
     await supabase.from("assets").delete().eq("id", id)
@@ -434,6 +558,7 @@ export default function AssetsPage() {
     toast.success("Asset deleted")
     loadAssets()
   }
+
 
   /* ---------------- EXPORT (FULL DATA + DATES) ---------------- */
   const handleExport = async (mode: "all" | "selected") => {
@@ -627,348 +752,644 @@ export default function AssetsPage() {
     loadAssets()
   }
 
+
+  /* ---------------- SUMMARY (derived from loaded rows) ---------------- */
+  const stats = React.useMemo(() => {
+    const count = (fn: (r: AssetRow) => boolean) => assets.filter(fn).length
+    return {
+      total: assets.length,
+      inUse: count((r) => norm(r.status) === "in_use"),
+      spare: count((r) => norm(r.status) === "spare"),
+      retired: count((r) => norm(r.status) === "retired"),
+      expiring: count((r) => warrantyBucket(r.warranty_expiry) === "expiring"),
+    }
+  }, [assets])
+
+  const statCards = [
+    {
+      label: "Total Assets",
+      value: stats.total,
+      icon: Boxes,
+      hint: isFiltered
+        ? `${filteredAssets.length.toLocaleString()} match current filters`
+        : "Across all organizations",
+    },
+    { label: "In Use", value: stats.inUse, icon: CircleCheck, hint: "Currently deployed" },
+    { label: "Spare", value: stats.spare, icon: PackageOpen, hint: "Available to assign" },
+    { label: "Retired", value: stats.retired, icon: Archive, hint: "Out of service" },
+    {
+      label: "Warranty Expiring",
+      value: stats.expiring,
+      icon: ShieldAlert,
+      hint: "Within the next 30 days",
+    },
+  ]
+
+  // DataTable highlight state mirrors the existing `selected` set
+  const rowSelection = React.useMemo<RowSelectionState>(
+    () => Object.fromEntries(Array.from(selected, (id) => [id, true])),
+    [selected]
+  )
+
+  const importInputRef = React.useRef<HTMLInputElement>(null)
+
+  const clearImportFile = () => {
+    setFile(null)
+    if (importInputRef.current) importInputRef.current.value = ""
+  }
+
+  const deleteTarget = deleteId ? assets.find((a) => a.id === deleteId) : null
+
+  /* ---------------- TABLE COLUMNS ---------------- */
+  const columns: ColumnDef<AssetRow>[] = [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label="Select all on this page"
+          checked={
+            table.getIsAllPageRowsSelected()
+              ? true
+              : table.getIsSomePageRowsSelected()
+                ? "indeterminate"
+                : false
+          }
+          onCheckedChange={(v) => toggleAll(Boolean(v))}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label={`Select ${row.original.asset_code}`}
+          checked={row.getIsSelected()}
+          onCheckedChange={() => toggleOne(row.original.id)}
+        />
+      ),
+      enableSorting: false,
+      meta: { className: "w-10 pr-0", headerClassName: "w-10 pr-0" },
+    },
+    {
+      accessorKey: "asset_code",
+      header: "Asset Code",
+      cell: ({ row }) => (
+        <Badge
+          variant="outline"
+          className="rounded-md border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs font-semibold text-gray-800 dark:border-white/10 dark:bg-white/5 dark:text-gray-200"
+        >
+          {row.original.asset_code}
+        </Badge>
+      ),
+    },
+    {
+      accessorKey: "asset_type",
+      header: "Type",
+      cell: ({ row }) => (
+        <div className="min-w-0 max-w-[220px]">
+          <p className="truncate font-medium text-gray-900 dark:text-white">
+            {row.original.asset_type}
+          </p>
+          {row.original.model && (
+            <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+              {row.original.model}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <StatusBadge
+          tone={STATUS_BADGE_TONE[norm(row.original.status)] ?? "gray"}
+          dot
+        >
+          {formatStatus(row.original.status)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "organization",
+      header: "Organization",
+      cell: ({ row }) => {
+        const orgId = row.original.organization_id
+        const name = orgId ? orgNameMap.get(orgId) : null
+        return name ? (
+          <span className="text-gray-700 dark:text-gray-300">{name}</span>
+        ) : (
+          <Dash />
+        )
+      },
+    },
+    {
+      accessorKey: "location",
+      header: "Location",
+      cell: ({ row }) =>
+        row.original.location ? (
+          <span className="inline-flex items-center gap-1.5">
+            <MapPin className="size-3.5 shrink-0 text-gray-400 dark:text-gray-500" />
+            {row.original.location}
+          </span>
+        ) : (
+          <Dash />
+        ),
+    },
+    {
+      id: "assigned",
+      header: "Assigned To",
+      cell: ({ row }) => {
+        const a = row.original
+        if (a.assigned_email) {
+          return (
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Avatar className="size-7">
+                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+                  {emailInitials(a.assigned_email)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="max-w-[220px] truncate">{a.assigned_email}</span>
+            </div>
+          )
+        }
+        return a.assigned ? (
+          <StatusBadge tone="indigo">Assigned</StatusBadge>
+        ) : (
+          <Dash />
+        )
+      },
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      meta: { className: "text-right", headerClassName: "text-right" },
+      cell: ({ row }) => {
+        const a = row.original
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <RowAction
+              label="View asset"
+              onClick={() => router.push(`/assets/${a.id}`)}
+              className="hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+            >
+              <Eye className="size-4" />
+            </RowAction>
+            <RowAction
+              label="Edit asset"
+              onClick={() => router.push(`/assets/edit/${a.id}`)}
+              className="hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+            >
+              <Pencil className="size-4" />
+            </RowAction>
+            <RowAction
+              label="Delete asset"
+              onClick={() => setDeleteId(a.id)}
+              className="text-red-500 hover:bg-red-50 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-500/10"
+            >
+              <Trash2 className="size-4" />
+            </RowAction>
+          </div>
+        )
+      },
+    },
+  ]
+
+  /* ---------------- FILTER SECTIONS (sidebar + mobile sheet) ---------------- */
+  const filterSections = (
+    <>
+      {FACETS.map((f) => (
+        <FacetFilter
+          key={f.key}
+          title={f.title}
+          defaultOpen={f.defaultOpen}
+          options={facetOptions[f.key]}
+          selected={filters[f.key]}
+          onToggle={(v) => toggleFilter(f.key, v)}
+        />
+      ))}
+
+      <FilterSection title="Added on" defaultOpen>
+        <Select value={added} onValueChange={setAdded}>
+          <SelectTrigger size="sm" className="w-full rounded-lg" aria-label="Added on">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ADDED_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </FilterSection>
+    </>
+  )
+
+  const mobileFilterButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      className="lg:hidden"
+      onClick={() => setShowFilters((v) => !v)}
+    >
+      <SlidersHorizontal className="size-4" />
+      Filters
+      {activeChips.length > 0 && (
+        <StatusBadge tone="indigo" className="px-1.5 py-0 text-[11px]">
+          {activeChips.length}
+        </StatusBadge>
+      )}
+    </Button>
+  )
+
+  /* ---------------- BULK BAR + ACTIVE FILTER CHIPS ---------------- */
+  const subHeader =
+    selected.size > 0 || activeChips.length > 0 ? (
+      <div className="flex flex-col gap-3">
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50/70 px-3 py-2 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:ring-indigo-500/20">
+            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
+              {selected.size} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelected(new Set())}
+                className="text-gray-600 hover:bg-white/70 dark:text-gray-300 dark:hover:bg-white/5"
+              >
+                Clear selection
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setExportMode("selected")
+                  setExportOpen(true)
+                }}
+              >
+                <Download className="size-4" />
+                Export selected
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {activeChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeChips.map((chip) => (
+              <Badge
+                key={chip.id}
+                variant="outline"
+                className="gap-1 rounded-full border-indigo-100 bg-indigo-50 py-0.5 pl-3 pr-1 text-xs font-medium text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/15 dark:text-indigo-300"
+              >
+                {chip.label}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={chip.onRemove}
+                  aria-label={`Remove ${chip.label}`}
+                  className="size-5 rounded-full text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-500/20"
+                >
+                  <X className="size-3" />
+                </Button>
+              </Badge>
+            ))}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={clearFilters}
+              className="h-auto px-1 text-xs text-gray-500 dark:text-gray-400"
+            >
+              Clear all
+            </Button>
+          </div>
+        )}
+      </div>
+    ) : undefined
+
   /* ---------------- UI ---------------- */
   return (
     <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
-      <Card className="p-6 space-y-6">
-        {/* HEADER */}
-        <div className="flex flex-wrap justify-between items-center gap-3">
-          <h2 className="text-xl font-semibold">
-            Assets
-            {!loading && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                {filteredAssets.length} of {assets.length}
-              </span>
-            )}
-            {selected.size > 0 &&
-              ` (${selected.size} selected)`}
-          </h2>
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          title="Assets"
+          description="Track hardware inventory, assignments and warranty coverage across organizations."
+          actions={
+            <>
+              {/* IMPORT */}
+              <Dialog open={importOpen} onOpenChange={setImportOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <Upload className="size-4" />
+                    Import
+                  </Button>
+                </DialogTrigger>
 
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => router.push("/assets/create")}>
-              Add Asset
-            </Button>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Import Assets</DialogTitle>
+                    <DialogDescription>
+                      Download the template to see the required format, fill in your data, then upload.
+                    </DialogDescription>
+                  </DialogHeader>
 
-            {/* EXPORT */}
-            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
-                </Button>
-              </DialogTrigger>
+                  <FieldGroup className="gap-4">
+                    <Field>
+                      <FieldLabel>1. Get the template</FieldLabel>
+                      <div className="flex items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-white/10">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20">
+                          <FileSpreadsheet className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                            asset-import-template.xlsx
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Every supported column, with a sample row
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadTemplate}
+                        >
+                          <Download className="size-4" />
+                          Template
+                        </Button>
+                      </div>
+                    </Field>
 
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Export Assets</DialogTitle>
-                </DialogHeader>
+                    <Field>
+                      <FieldLabel htmlFor="asset-import-file">
+                        2. Upload your file
+                      </FieldLabel>
+                      <input
+                        ref={importInputRef}
+                        id="asset-import-file"
+                        type="file"
+                        accept=".xlsx,.csv"
+                        className="hidden"
+                        onChange={(e) =>
+                          setFile(e.target.files?.[0] ?? null)
+                        }
+                      />
+                      <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/60 px-4 py-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+                          <CloudUpload className="size-5" />
+                        </span>
+                        {file ? (
+                          <div className="flex max-w-full items-center gap-1">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                              {file.name}
+                            </p>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={clearImportFile}
+                              aria-label="Remove file"
+                              className="size-6 text-gray-500 hover:text-red-600 dark:text-gray-400"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-600 dark:text-gray-300">
+                            Excel (.xlsx) or CSV file
+                          </p>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => importInputRef.current?.click()}
+                        >
+                          {file ? "Choose another file" : "Choose file"}
+                        </Button>
+                      </div>
+                    </Field>
+                  </FieldGroup>
 
-                <RadioGroup
-                  value={exportMode}
-                  onValueChange={(v) =>
-                    setExportMode(v as "all" | "selected")
-                  }
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="all" />
-                    <Label>
-                      Export {isFiltered ? "FILTERED" : "ALL"} ({filteredAssets.length})
-                    </Label>
-                  </div>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline">Cancel</Button>
+                    </DialogClose>
+                    <Button
+                      variant="gradient"
+                      disabled={!file}
+                      onClick={handleImport}
+                    >
+                      <Upload className="size-4" />
+                      Upload
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem
-                      value="selected"
-                      disabled={selected.size === 0}
-                    />
-                    <Label>
-                      Export SELECTED ({selected.size})
-                    </Label>
-                  </div>
-                </RadioGroup>
+              {/* EXPORT */}
+              <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="size-4" />
+                    Export
+                  </Button>
+                </DialogTrigger>
 
-                <Button
-                  className="w-full mt-4"
-                  onClick={() => handleExport(exportMode)}
-                  disabled={
-                    exportMode === "selected" &&
-                    selected.size === 0
-                  }
-                >
-                  Download Excel
-                </Button>
-              </DialogContent>
-            </Dialog>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Export Assets</DialogTitle>
+                    <DialogDescription>
+                      Excel export with hardware details, dates and the assigned user.
+                    </DialogDescription>
+                  </DialogHeader>
 
-            {/* IMPORT */}
-            <Dialog open={importOpen} onOpenChange={setImportOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Import
-                </Button>
-              </DialogTrigger>
+                  <FieldSet className="gap-3">
+                    <FieldLegend className="sr-only">Rows to export</FieldLegend>
+                    <RadioGroup
+                      value={exportMode}
+                      onValueChange={(v) =>
+                        setExportMode(v as "all" | "selected")
+                      }
+                      className="gap-3"
+                    >
+                      <ExportOption
+                        id="export-all"
+                        value="all"
+                        title={`Export ${isFiltered ? "filtered" : "all"} assets`}
+                        description={
+                          isFiltered
+                            ? "Every asset matching the current filters and search"
+                            : "Every asset in the inventory"
+                        }
+                        count={filteredAssets.length}
+                      />
+                      <ExportOption
+                        id="export-selected"
+                        value="selected"
+                        disabled={selected.size === 0}
+                        title="Export selected assets"
+                        description={
+                          selected.size === 0
+                            ? "Select rows in the table to enable this option"
+                            : "Only the rows you have checked"
+                        }
+                        count={selected.size}
+                      />
+                    </RadioGroup>
+                  </FieldSet>
 
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Import Assets</DialogTitle>
-                </DialogHeader>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline">Cancel</Button>
+                    </DialogClose>
+                    <Button
+                      variant="gradient"
+                      onClick={() => handleExport(exportMode)}
+                      disabled={
+                        exportMode === "selected" &&
+                        selected.size === 0
+                      }
+                    >
+                      <Download className="size-4" />
+                      Download Excel
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
-                <p className="text-sm text-muted-foreground">
-                  Download the template to see the required format, fill in your data, then upload.
-                </p>
+              <Button
+                variant="gradient"
+                onClick={() => router.push("/assets/create")}
+              >
+                <Plus className="size-4" />
+                Add Asset
+              </Button>
+            </>
+          }
+        />
 
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleDownloadTemplate}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Template
-                </Button>
-
-                <Input
-                  type="file"
-                  accept=".xlsx,.csv"
-                  onChange={(e) =>
-                    setFile(e.target.files?.[0] ?? null)
-                  }
-                />
-
-                <Button
-                  className="w-full"
-                  disabled={!file}
-                  onClick={handleImport}
-                >
-                  Upload
-                </Button>
-              </DialogContent>
-            </Dialog>
-          </div>
+        {/* SUMMARY */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {loading
+            ? Array.from({ length: 5 }).map((_, i) => (
+              <StatCardSkeleton key={i} />
+            ))
+            : statCards.map((c, i) => (
+              <StatCard
+                key={c.label}
+                label={c.label}
+                value={c.value}
+                icon={c.icon}
+                hint={c.hint}
+                tone={STAT_TONE_CYCLE[i % STAT_TONE_CYCLE.length]}
+              />
+            ))}
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row">
-          {/* SIDEBAR FILTERS */}
-          <aside
-            className={`${showFilters ? "block" : "hidden"} lg:block lg:w-64 shrink-0`}
-          >
+        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+          {/* SIDEBAR FILTERS (lg+) */}
+          <aside className="hidden min-w-0 lg:block">
             <FilterPanel
               activeCount={activeChips.length}
               onClearAll={clearFilters}
             >
-              {FACETS.map((f) => (
-                <FacetFilter
-                  key={f.key}
-                  title={f.title}
-                  defaultOpen={f.defaultOpen}
-                  options={facetOptions[f.key]}
-                  selected={filters[f.key]}
-                  onToggle={(v) => toggleFilter(f.key, v)}
-                />
-              ))}
-
-              <FilterSection title="Added on" defaultOpen>
-                <Select value={added} onValueChange={setAdded}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ADDED_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FilterSection>
+              {filterSections}
             </FilterPanel>
           </aside>
 
-          <div className="flex-1 min-w-0 space-y-4">
-            {/* SEARCH */}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search code, model, user, location, organization..."
-                  className="pl-9"
-                />
-              </div>
+          {/* TABLE */}
+          <DataTable
+            columns={columns}
+            data={paginatedAssets}
+            loading={loading}
+            title="Asset inventory"
+            description={
+              loading
+                ? "Loading assets…"
+                : `${filteredAssets.length.toLocaleString()} of ${assets.length.toLocaleString()} assets`
+            }
+            searchable
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search code, model, user, location…"
+            filters={mobileFilterButton}
+            subHeader={subHeader}
+            pagination={{
+              pageIndex: page - 1,
+              pageSize: PAGE_SIZE,
+              totalRows: filteredAssets.length,
+              onPageChange: (index) => setPage(index + 1),
+            }}
+            entityName="assets"
+            getRowId={(r) => r.id}
+            rowSelection={rowSelection}
+            emptyIcon={Boxes}
+            emptyTitle={
+              isFiltered ? "No assets match your filters" : "No assets yet"
+            }
+            emptyDescription={
+              isFiltered
+                ? "Try removing a filter or changing your search."
+                : "Add an asset or import a spreadsheet to get started."
+            }
+            emptyAction={
+              isFiltered ? (
+                <Button variant="outline" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+            className="min-w-0"
+          />
+        </div>
+
+        {/* MOBILE FILTERS (< lg) */}
+        <Sheet open={showFilters} onOpenChange={setShowFilters}>
+          <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-sm">
+            <SheetHeader className="border-b border-gray-200 px-5 py-4 dark:border-white/10">
+              <SheetTitle className="flex items-center gap-2 text-base text-gray-900 dark:text-white">
+                <SlidersHorizontal className="size-4 text-indigo-600 dark:text-indigo-300" />
+                Filters
+                {activeChips.length > 0 && (
+                  <StatusBadge tone="indigo" className="px-2 text-[11px]">
+                    {activeChips.length}
+                  </StatusBadge>
+                )}
+              </SheetTitle>
+              <SheetDescription>Narrow down the asset list.</SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto">{filterSections}</div>
+            <SheetFooter className="flex-row gap-2 border-t border-gray-200 px-5 py-4 dark:border-white/10">
               <Button
                 variant="outline"
-                className="lg:hidden"
-                onClick={() => setShowFilters((v) => !v)}
+                className="flex-1"
+                onClick={clearFilters}
+                disabled={activeChips.length === 0}
               >
-                <SlidersHorizontal className="h-4 w-4" />
-                Filters
-                {activeChips.length > 0 && ` (${activeChips.length})`}
+                Clear all
               </Button>
-            </div>
+              <Button
+                variant="gradient"
+                className="flex-1"
+                onClick={() => setShowFilters(false)}
+              >
+                Show {filteredAssets.length.toLocaleString()} results
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
 
-            {/* ACTIVE FILTER CHIPS */}
-            {activeChips.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
-                {activeChips.map((chip) => (
-                  <span
-                    key={chip.id}
-                    className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-3 pr-1.5 text-xs font-medium text-brand-500 dark:bg-brand-500/15 dark:text-brand-400"
-                  >
-                    {chip.label}
-                    <button
-                      type="button"
-                      onClick={chip.onRemove}
-                      className="rounded-full p-0.5 hover:bg-brand-100 dark:hover:bg-brand-500/20"
-                      aria-label={`Remove ${chip.label}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="text-xs font-medium text-muted-foreground hover:underline"
-                >
-                  Clear all
-                </button>
-              </div>
-            )}
-
-        {/* TABLE */}
-        {loading ? (
-          <Skeleton className="h-64 w-full" />
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>
-                    <Checkbox
-                      checked={
-                        paginatedAssets.length > 0 &&
-                        paginatedAssets.every((a) =>
-                          selected.has(a.id)
-                        )
-                      }
-                      onCheckedChange={(v) =>
-                        toggleAll(Boolean(v))
-                      }
-                    />
-                  </TableHead>
-                  <TableHead>Asset Code</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Organization</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Assigned To</TableHead>
-                  <TableHead className="text-right">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {paginatedAssets.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                      No assets match your filters.{" "}
-                      {isFiltered && (
-                        <button
-                          type="button"
-                          onClick={clearFilters}
-                          className="font-medium text-brand-500 hover:underline"
-                        >
-                          Clear filters
-                        </button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {paginatedAssets.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selected.has(a.id)}
-                        onCheckedChange={() =>
-                          toggleOne(a.id)
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>{a.asset_code}</TableCell>
-                    <TableCell>{a.asset_type}</TableCell>
-                    <TableCell>{formatStatus(a.status)}</TableCell>
-                    <TableCell>
-                      {a.organization_id
-                        ? orgNameMap.get(a.organization_id) ?? "—"
-                        : "—"}
-                    </TableCell>
-                    <TableCell>{a.location ?? "-"}</TableCell>
-                    <TableCell>
-                      {a.assigned_email ?? (a.assigned ? "Assigned" : "—")}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                          router.push(`/assets/${a.id}`)
-                        }
-                      >
-                        <Eye className="h-5 w-5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                          router.push(`/assets/edit/${a.id}`)
-                        }
-                      >
-                        <Pencil className="h-5 w-5" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() =>
-                          handleDeleteRow(a.id)
-                        }
-                      >
-                        <Trash2 className="h-5 w-5 text-red-500" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-
-            {/* PAGINATION */}
-            <div className="flex justify-between items-center mt-4">
-              <span className="text-sm text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={page === totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
-          </div>
-        </div>
-      </Card>
+        <ConfirmDialog
+          open={deleteId !== null}
+          onOpenChange={(open) => {
+            if (!open) setDeleteId(null)
+          }}
+          title={`Delete ${deleteTarget?.asset_code ?? "this asset"}?`}
+          description="This permanently removes the asset together with its hardware details and assignment records. This cannot be undone."
+          confirmLabel="Delete asset"
+          onConfirm={() => {
+            if (deleteId) handleDeleteRow(deleteId)
+          }}
+        />
+      </div>
     </RoleGate>
   )
 }

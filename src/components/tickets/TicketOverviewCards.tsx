@@ -1,9 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { TrendingUp } from "lucide-react"
+import {
+  CircleCheck,
+  CirclePause,
+  FolderOpen,
+  Inbox,
+  Ticket,
+  type LucideIcon,
+} from "lucide-react"
+import { StatCard, StatCardSkeleton, type StatTone } from "@/components/common/stat-card"
+import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
@@ -13,6 +20,19 @@ type OverviewStat = {
   label: string
   value: number
 }
+
+/* Both role variants list stats in the same order: total, new, open, hold, closed */
+const STAT_STYLES: { icon: LucideIcon; tone: StatTone }[] = [
+  { icon: Ticket, tone: "indigo" },
+  { icon: Inbox, tone: "sky" },
+  { icon: FolderOpen, tone: "amber" },
+  { icon: CirclePause, tone: "rose" },
+  { icon: CircleCheck, tone: "emerald" },
+]
+
+const GRID = "grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5"
+/* On phones the first (total) tile spans the row so the rest sit in a neat 2×2 */
+const FIRST_TILE = "col-span-2 md:col-span-1"
 
 export default function TicketOverviewCards() {
   const [stats, setStats] = React.useState<OverviewStat[]>([])
@@ -163,12 +183,9 @@ export default function TicketOverviewCards() {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className={GRID}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <Card key={i} className="p-5">
-            <Skeleton className="h-5 w-24 mb-2" />
-            <Skeleton className="h-8 w-16" />
-          </Card>
+          <StatCardSkeleton key={i} className={cn(i === 0 && FIRST_TILE)} />
         ))}
       </div>
     )
@@ -177,21 +194,20 @@ export default function TicketOverviewCards() {
   if (stats.length === 0) return null
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-      {stats.map((stat) => (
-        <Card key={stat.label} className="p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">{stat.label}</p>
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
-              <TrendingUp className="h-5 w-5 text-green-600" />
-            </span>
-          </div>
-
-          <CardContent className="p-0 mt-2">
-            <h3 className="text-3xl font-bold">{stat.value}</h3>
-          </CardContent>
-        </Card>
-      ))}
+    <div className={GRID}>
+      {stats.map((stat, i) => {
+        const style = STAT_STYLES[i % STAT_STYLES.length]
+        return (
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={style.icon}
+            tone={style.tone}
+            className={cn(i === 0 && FIRST_TILE)}
+          />
+        )
+      })}
     </div>
   )
 }

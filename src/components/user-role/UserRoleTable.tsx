@@ -1,46 +1,50 @@
 "use client"
 
 import * as React from "react"
-import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org"
 
-import {
+import type {
   ColumnDef,
-  ColumnFiltersState,
-  SortingState,
+  RowSelectionState,
   VisibilityState,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
 } from "@tanstack/react-table"
 import {
+  Columns3,
   Eye,
+  ListFilter,
+  Shield,
+  ShieldCheck,
   Trash2,
+  UserRound,
+  Users,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react"
-import { ArrowUpDown, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Skeleton } from "@/components/ui/skeleton"
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { StatCard, StatCardSkeleton, type StatTone } from "@/components/common/stat-card"
+import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
+import { getInitials, roleLabel } from "@/hooks/useCurrentUser"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 /* ---------------- TYPES ---------------- */
@@ -60,6 +64,26 @@ type Employee = {
   avatar: string
 }
 
+/* ---------------- PRESENTATION ---------------- */
+
+const ROLE_TONE: Record<Role, BadgeTone> = {
+  superadmin: "violet",
+  admin: "orange",
+  engineer: "sky",
+  user: "gray",
+}
+
+/** Columns the "Columns" menu can toggle, with friendly labels */
+const HIDEABLE_COLUMNS: { id: string; label: string }[] = [
+  { id: "role", label: "Role" },
+  { id: "empId", label: "Emp ID" },
+  { id: "department", label: "Department" },
+  { id: "position", label: "Position" },
+  { id: "email", label: "Official Email" },
+  { id: "phone", label: "Phone" },
+  { id: "location", label: "Location" },
+]
+
 /* ---------------- COMPONENT ---------------- */
 
 export default function EmployeeTable() {
@@ -71,12 +95,14 @@ export default function EmployeeTable() {
   const [currentRole, setCurrentRole] =
     React.useState<Role>("user")
 
-  const [sorting, setSorting] = React.useState<SortingState>([])
-  const [columnFilters, setColumnFilters] =
-    React.useState<ColumnFiltersState>([])
+  const [roleFilter, setRoleFilter] = React.useState<Role[]>([])
+  // Email already shows under each name, so its own column starts hidden
   const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({})
-  const [rowSelection, setRowSelection] = React.useState({})
+    React.useState<VisibilityState>({ email: false })
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
+
+  const [pendingDelete, setPendingDelete] = React.useState<Employee | null>(null)
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
 
   /* ---------------- FETCH USERS ---------------- */
 
@@ -157,18 +183,18 @@ export default function EmployeeTable() {
 
   /* ---------------- DELETE USER ---------------- */
 
-  const handleDeleteUser = async (user: Employee) => {
+  const handleDeleteUser = (user: Employee) => {
     if (user.role === "admin" || user.role === "superadmin") {
       toast.error("Admin account cannot be deleted")
       return
     }
 
-    const ok = window.confirm(
-      `Are you sure you want to delete ${user.name}? This will immediately log them out of all sessions.`
-    )
+    // Confirmation happens in <ConfirmDialog> (replaces window.confirm)
+    setPendingDelete(user)
+    setConfirmOpen(true)
+  }
 
-    if (!ok) return
-
+  const deleteUser = async (user: Employee) => {
     try {
       const {
         data: { session },
@@ -209,7 +235,11 @@ export default function EmployeeTable() {
       id: "select",
       header: ({ table }) => (
         <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
+          aria-label="Select all users on this page"
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
           onCheckedChange={(v) =>
             table.toggleAllPageRowsSelected(!!v)
           }
@@ -217,64 +247,97 @@ export default function EmployeeTable() {
       ),
       cell: ({ row }) => (
         <Checkbox
+          aria-label={`Select ${row.original.name}`}
           checked={row.getIsSelected()}
           onCheckedChange={(v) =>
             row.toggleSelected(!!v)
           }
         />
       ),
+      enableSorting: false,
+      enableHiding: false,
+      meta: { className: "w-10", headerClassName: "w-10" },
     },
     {
-      id: "avatar",
-      header: "",
-      cell: ({ row }) => (
-        <Image
-          src={row.original.avatar}
-          alt={row.original.name}
-          width={36}
-          height={36}
-          className="rounded-full"
-        />
+      accessorKey: "name",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title="User" />
       ),
+      cell: ({ row }) => {
+        const user = row.original
+        return (
+          <div className="flex min-w-[220px] items-center gap-3">
+            <Avatar className="h-9 w-9">
+              <AvatarImage src={user.avatar} alt={user.name} />
+              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                {getInitials(user.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="truncate font-medium text-gray-900 dark:text-white">
+                {user.name}
+              </p>
+              <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                {user.email}
+              </p>
+            </div>
+          </div>
+        )
+      },
+      enableHiding: false,
     },
-    { accessorKey: "name", header: "Name" },
     {
       accessorKey: "role",
       header: "Role",
       cell: ({ row }) => (
-        <span className="capitalize font-semibold">
-          {row.original.role}
+        <StatusBadge tone={ROLE_TONE[row.original.role] ?? "gray"} dot>
+          {roleLabel(row.original.role)}
+        </StatusBadge>
+      ),
+    },
+    {
+      accessorKey: "empId",
+      header: "Emp ID",
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-gray-600 dark:text-gray-400">
+          {row.original.empId}
         </span>
       ),
-      filterFn: (row, id, value: string[]) =>
-        value.includes(row.getValue(id)),
     },
-    { accessorKey: "empId", header: "Emp ID" },
-    { accessorKey: "department", header: "Department" },
-    { accessorKey: "position", header: "Position" },
+    {
+      accessorKey: "department",
+      header: "Department",
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "position",
+      header: "Position",
+      meta: { className: "whitespace-nowrap" },
+    },
     {
       accessorKey: "email",
       header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() =>
-            column.toggleSorting(
-              column.getIsSorted() === "asc"
-            )
-          }
-        >
-          Official Email
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
+        <DataTableColumnHeader column={column} title="Official Email" />
       ),
     },
-    { accessorKey: "phone", header: "Phone" },
-    { accessorKey: "location", header: "Location" },
+    {
+      accessorKey: "phone",
+      header: "Phone",
+      meta: { className: "whitespace-nowrap tabular-nums" },
+    },
+    {
+      accessorKey: "location",
+      header: "Location",
+      meta: { className: "whitespace-nowrap" },
+    },
 
     /* -------- ACTIONS -------- */
     {
       id: "actions",
       header: "Actions",
+      enableSorting: false,
+      enableHiding: false,
+      meta: { className: "text-right", headerClassName: "text-right" },
       cell: ({ row }) => {
         const user = row.original
 
@@ -291,25 +354,39 @@ export default function EmployeeTable() {
           user.role !== "admin" && user.role !== "superadmin"
 
         return (
-          <div className="flex gap-2">
+          <div className="flex items-center justify-end gap-1">
             {canView && (
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => router.push(`/profile/${user.id}`)}
-              >
-                <Eye className="h-5 w-5" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`View ${user.name}`}
+                    onClick={() => router.push(`/profile/${user.id}`)}
+                    className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                  >
+                    <Eye />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View profile</TooltipContent>
+              </Tooltip>
             )}
 
             {canDelete && (
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => handleDeleteUser(user)}
-              >
-                <Trash2 className="h-5 w-5 text-red-500" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Delete ${user.name}`}
+                    onClick={() => handleDeleteUser(user)}
+                    className="text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  >
+                    <Trash2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete user</TooltipContent>
+              </Tooltip>
             )}
           </div>
         )
@@ -317,185 +394,188 @@ export default function EmployeeTable() {
     },
   ]
 
-  /* ---------------- TABLE ---------------- */
-
-  const table = useReactTable({
-    data,
-    columns,
-    state: {
-      sorting,
-      columnFilters,
-      columnVisibility,
-      rowSelection,
-    },
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-  })
+  /* ---------------- DERIVED ---------------- */
 
   const roles: Role[] = ["user", "engineer", "admin"]
+
+  const filteredData =
+    roleFilter.length > 0
+      ? data.filter((u) => roleFilter.includes(u.role))
+      : data
+
+  const selectedCount = filteredData.filter((u) => rowSelection[u.id]).length
+
+  const countRole = (role: Role) => data.filter((u) => u.role === role).length
+
+  // Engineers only ever load users + engineers, so admin tiles would always read 0
+  const showAdminStats = currentRole !== "engineer"
+
+  const stats: { label: string; value: number; icon: LucideIcon; tone: StatTone }[] = [
+    { label: "Total Users", value: data.length, icon: Users, tone: "indigo" },
+    ...(showAdminStats
+      ? [
+          { label: "Super Admins", value: countRole("superadmin"), icon: ShieldCheck, tone: "violet" as const },
+          { label: "Admins", value: countRole("admin"), icon: Shield, tone: "orange" as const },
+        ]
+      : []),
+    { label: "Engineers", value: countRole("engineer"), icon: Wrench, tone: "sky" },
+    { label: "End Users", value: countRole("user"), icon: UserRound, tone: "emerald" },
+  ]
+
+  /* ---------------- TOOLBAR ---------------- */
+
+  const roleFilterMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <ListFilter />
+          Role
+          {roleFilter.length > 0 && (
+            <span className="rounded-full bg-indigo-50 px-1.5 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+              {roleFilter.length}
+            </span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>Filter by role</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {roles.map((role) => (
+          <DropdownMenuCheckboxItem
+            key={role}
+            checked={roleFilter.includes(role)}
+            onSelect={(e) => e.preventDefault()}
+            onCheckedChange={(checked) =>
+              setRoleFilter((prev) =>
+                checked
+                  ? [...prev, role]
+                  : prev.filter((r) => r !== role)
+              )
+            }
+          >
+            <StatusBadge tone={ROLE_TONE[role]} dot>
+              {roleLabel(role)}
+            </StatusBadge>
+          </DropdownMenuCheckboxItem>
+        ))}
+        {roleFilter.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setRoleFilter([])}>
+              Clear filter
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
+  const columnsMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Columns3 />
+          Columns
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {HIDEABLE_COLUMNS.map((column) => (
+          <DropdownMenuCheckboxItem
+            key={column.id}
+            checked={columnVisibility[column.id] !== false}
+            onSelect={(e) => e.preventDefault()}
+            onCheckedChange={(v) =>
+              setColumnVisibility((prev) => ({ ...prev, [column.id]: !!v }))
+            }
+          >
+            {column.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
+  const selectionBar =
+    selectedCount > 0 ? (
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-indigo-50/60 px-3 py-1.5 text-sm text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/20">
+        <span>
+          <span className="font-semibold">{selectedCount}</span> of{" "}
+          {filteredData.length} selected
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setRowSelection({})}
+          className="h-8 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+        >
+          Clear selection
+        </Button>
+      </div>
+    ) : undefined
 
   /* ---------------- UI ---------------- */
 
   return (
-    <div className="w-full">
-      {/* Filters */}
-      <div className="flex items-center gap-2 py-4">
-        <Input
-          placeholder="Search email..."
-          value={
-            (table.getColumn("email")?.getFilterValue() as string) ??
-            ""
-          }
-          onChange={(e) =>
-            table
-              .getColumn("email")
-              ?.setFilterValue(e.target.value)
-          }
-          className="max-w-sm"
-        />
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline">Filter Role</Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            {roles.map((role) => (
-              <DropdownMenuCheckboxItem
-                key={role}
-                checked={(
-                  table.getColumn("role")?.getFilterValue() as string[]
-                )?.includes(role)}
-                onCheckedChange={(checked) => {
-                  const prev =
-                    (table.getColumn("role")?.getFilterValue() as
-                      | string[]
-                      | undefined) ?? []
-
-                  table
-                    .getColumn("role")
-                    ?.setFilterValue(
-                      checked
-                        ? [...prev, role]
-                        : prev.filter((r) => r !== role)
-                    )
-                }}
-              >
-                {role}
-              </DropdownMenuCheckboxItem>
+    <div className="flex flex-col gap-6">
+      {/* Role counts */}
+      <div
+        className={cn(
+          "grid grid-cols-2 gap-3 md:grid-cols-3",
+          (loading || showAdminStats) && "xl:grid-cols-5"
+        )}
+      >
+        {loading
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <StatCardSkeleton key={i} className={cn(i === 0 && "col-span-2 md:col-span-1")} />
+            ))
+          : stats.map((stat, i) => (
+              <StatCard
+                key={stat.label}
+                label={stat.label}
+                value={stat.value}
+                icon={stat.icon}
+                tone={stat.tone}
+                className={cn(i === 0 && "col-span-2 md:col-span-1")}
+              />
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" className="ml-auto">
-              Columns <ChevronDown className="ml-2 h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {table
-              .getAllColumns()
-              .filter((c) => c.getCanHide())
-              .map((column) => (
-                <DropdownMenuCheckboxItem
-                  key={column.id}
-                  checked={column.getIsVisible()}
-                  onCheckedChange={(v) =>
-                    column.toggleVisibility(!!v)
-                  }
-                >
-                  {column.id}
-                </DropdownMenuCheckboxItem>
-              ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
-      {/* Table */}
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((group) => (
-              <TableRow key={group.id}>
-                {group.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
+      <DataTable
+        columns={columns}
+        data={filteredData}
+        loading={loading}
+        title="All users"
+        description="Everyone in your organisation and the role they hold"
+        searchable
+        searchPlaceholder="Search users…"
+        filters={roleFilterMenu}
+        toolbarActions={columnsMenu}
+        subHeader={selectionBar}
+        getRowId={(row) => row.id}
+        rowSelection={rowSelection}
+        onRowSelectionChange={setRowSelection}
+        columnVisibility={columnVisibility}
+        pageSize={10}
+        pageSizeOptions={[10, 20, 50]}
+        entityName="users"
+        emptyIcon={Users}
+        emptyTitle="No users found"
+        emptyDescription="Try a different search term or clear the role filter."
+      />
 
-          <TableBody>
-            {loading ? (
-              [...Array(5)].map((_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={columns.length}>
-                    <Skeleton className="h-10 w-full" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-24 text-center"
-                >
-                  No results.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Pagination */}
-      <div className="flex items-center justify-end space-x-2 py-4">
-        <div className="text-muted-foreground flex-1 text-sm">
-          {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} selected
-        </div>
-        <div className="space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-          >
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Delete user?"
+        description={`Are you sure you want to delete ${pendingDelete?.name ?? "this user"}? This will immediately log them out of all sessions.`}
+        confirmLabel="Delete user"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingDelete) void deleteUser(pendingDelete)
+        }}
+      />
     </div>
   )
 }

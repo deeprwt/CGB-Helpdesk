@@ -4,13 +4,12 @@ import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -21,13 +20,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { PageHeader, type PageHeaderMetaItem } from "@/components/common/page-header";
+import { StatusBadge } from "@/components/common/status-badge";
+import { statusLabel } from "@/lib/ticket-utils";
 import {
   ArrowLeft,
   RotateCcw,
   UserPlus,
   AlertTriangle,
-  Clock,
-  Shield,
+  CheckCircle2,
+  Loader2,
+  PauseCircle,
+  Ticket as TicketIcon,
 } from "lucide-react";
 
 import TicketMetaPanel from "@/components/tickets/ticket-details/TicketMetaPanel";
@@ -66,6 +71,8 @@ type Ticket = {
   assigned_at: string | null;
   created_at: string;
   link: string | null;
+  category?: string | null;
+  sub_category?: string | null;
   closed_comment?: string | null;
   hold_comment?: string | null;
   hold_duration_hours?: number | null;
@@ -149,14 +156,20 @@ function fmtDateTime(d: Date) {
   });
 }
 
-const AVATAR_COLORS = [
-  "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
-  "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
-  "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
-];
+/** Hero meta dot colour per ticket status */
+const STATUS_DOT: Record<string, string> = {
+  new: "bg-blue-400",
+  open: "bg-amber-400",
+  in_progress: "bg-orange-400",
+  hold: "bg-violet-400",
+  closed: "bg-emerald-400",
+};
+
+const PRIORITY_DOT: Record<string, string> = {
+  high: "bg-red-400",
+  medium: "bg-amber-400",
+  low: "bg-emerald-400",
+};
 
 const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   created: "Ticket Created",
@@ -429,9 +442,15 @@ export default function TicketDetailsPage() {
 
   if (loading || !ticket || !userId || !role) {
     return (
-      <div className="p-6">
-        <Skeleton className="h-6 w-40 mb-4" />
-        <Skeleton className="h-64 w-full" />
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-40 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <Skeleton className="h-[640px] w-full rounded-2xl xl:col-span-8 xl:h-[760px]" />
+          <div className="flex flex-col gap-6 xl:col-span-4">
+            <Skeleton className="h-[420px] w-full rounded-2xl" />
+            <Skeleton className="h-72 w-full rounded-2xl" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -480,6 +499,9 @@ export default function TicketDetailsPage() {
           date: fmtDateTime(new Date(a.created_at)),
           status: ACTIVITY_ACTION_STATUS[a.action] ?? "done",
           comment,
+          action: a.action,
+          actor: a.actor_name,
+          timestamp: a.created_at,
         };
       })
     : [
@@ -488,21 +510,25 @@ export default function TicketDetailsPage() {
           label: "Ticket Created",
           date: fmtDate(new Date(ticket.created_at)),
           status: "done" as ActivityStatus,
+          action: "created",
+          timestamp: ticket.created_at,
         },
         {
           label: "Ticket Acquired",
           date: ticket.assigned_at ? fmtDate(new Date(ticket.assigned_at)) : undefined,
           status: (ticket.assignee ? "done" : "pending") as ActivityStatus,
+          action: ticket.assignee ? "acquired" : undefined,
+          timestamp: ticket.assigned_at ?? undefined,
         },
         {
           label: "Engineer is working on ticket",
           status: mapTicketStatusToActivity(ticket.status),
         },
         ...(ticket.status === "hold"
-          ? ([{ label: "Ticket On Hold", date: fmtDate(new Date()), status: "hold" as ActivityStatus, comment: ticket.hold_comment ?? null }])
+          ? ([{ label: "Ticket On Hold", date: fmtDate(new Date()), status: "hold" as ActivityStatus, comment: ticket.hold_comment ?? null, action: "hold" }])
           : []),
         ...(ticket.status === "closed"
-          ? ([{ label: "Ticket Closed", date: fmtDate(new Date()), status: "closed" as ActivityStatus, comment: ticket.closed_comment ?? null }])
+          ? ([{ label: "Ticket Closed", date: fmtDate(new Date()), status: "closed" as ActivityStatus, comment: ticket.closed_comment ?? null, action: "closed" }])
           : []),
       ];
 
@@ -517,75 +543,121 @@ export default function TicketDetailsPage() {
   const slaResolutionBreached = ticket.sla_resolution_breached ?? false;
   const hasSlaBreach = slaResponseBreached || slaResolutionBreached;
 
+  /* ── Hero header facts ── */
+  const shortId = ticket.id.slice(0, 8).toUpperCase();
+  const categoryText = [ticket.category, ticket.sub_category].filter(Boolean).join(" / ");
+  const heroMeta: PageHeaderMetaItem[] = [
+    { label: statusLabel(ticket.status), dot: STATUS_DOT[ticket.status] ?? "bg-gray-400" },
+    ...(ticket.priority
+      ? [{ label: `${statusLabel(ticket.priority)} priority`, dot: PRIORITY_DOT[ticket.priority] ?? "bg-gray-400" }]
+      : []),
+    ...(categoryText ? [{ label: categoryText, dot: "bg-sky-400" }] : []),
+    {
+      label: (
+        <>
+          Requested by{" "}
+          <span className="font-medium text-gray-900 dark:text-white">{ticket.requester_name}</span>
+        </>
+      ),
+      dot: "bg-indigo-400",
+    },
+    { label: `Created ${fmtDateTime(new Date(ticket.created_at))}`, dot: "bg-gray-400" },
+  ];
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" onClick={() => router.back()}>
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <h2 className="text-xl font-semibold">Ticket Details</h2>
-          {hasSlaBreach && (
-            <Badge className="bg-red-100 text-red-700 gap-1">
+      <PageHeader
+        variant="hero"
+        breadcrumbs={[{ label: "Tickets", href: "/ticket" }, { label: `#${shortId}` }]}
+        eyebrow="Ticket"
+        eyebrowIcon={TicketIcon}
+        title={<span className="break-words">{ticket.subject}</span>}
+        meta={heroMeta}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.back()}
+              className="bg-white/80 dark:bg-gray-900/60"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+
+            {/* Action Buttons */}
+            {isStaff && (
+              <>
+                {/* Reassign — for admin/superadmin when ticket has an assignee */}
+                {(role === "admin" || role === "superadmin") && ticket.assignee && ticket.status !== "closed" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-white/80 dark:bg-gray-900/60"
+                    onClick={() => {
+                      loadEngineers();
+                      setReassignOpen(true);
+                    }}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Reassign Ticket
+                  </Button>
+                )}
+
+                {/* Reopen — for closed or on-hold tickets */}
+                {(ticket.status === "closed" || ticket.status === "hold") && (
+                  <Button
+                    variant="gradient"
+                    size="sm"
+                    onClick={handleReopen}
+                    disabled={reopenLoading}
+                  >
+                    {reopenLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                    {reopenLoading ? "Reopening..." : "Reopen Ticket"}
+                  </Button>
+                )}
+
+                {/* Close & Hold — only when ticket is active */}
+                {ticket.status !== "closed" && ticket.status !== "hold" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-white/80 dark:bg-gray-900/60"
+                      onClick={() => setHoldOpen(true)}
+                    >
+                      <PauseCircle className="h-4 w-4" />
+                      Hold Ticket
+                    </Button>
+                    <Button variant="gradient" size="sm" onClick={() => setCloseOpen(true)}>
+                      <CheckCircle2 className="h-4 w-4" />
+                      Close Ticket
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        }
+      >
+        {hasSlaBreach && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <StatusBadge tone="red">
               <AlertTriangle className="h-3 w-3" />
               SLA Breach
-            </Badge>
-          )}
-        </div>
-      </div>
+            </StatusBadge>
+          </div>
+        )}
+      </PageHeader>
 
-      {/* SLA Status Bar */}
-      {(ticket.sla_response_at || ticket.sla_resolution_at || ticket.hold_until) && (
-        <div className="flex flex-wrap gap-3">
-          {ticket.status === "new" && ticket.sla_response_at && (
-            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
-              slaResponseBreached
-                ? "bg-red-50 text-red-700 border border-red-200"
-                : "bg-blue-50 text-blue-700 border border-blue-200"
-            }`}>
-              <Clock className="h-4 w-4" />
-              <span>Response SLA: {slaResponseBreached ? "BREACHED" : fmtDateTime(new Date(ticket.sla_response_at))}</span>
-            </div>
-          )}
-          {ticket.sla_resolution_at && ticket.assignee && ticket.status !== "closed" && (
-            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
-              slaResolutionBreached
-                ? "bg-red-50 text-red-700 border border-red-200"
-                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-            }`}>
-              <Shield className="h-4 w-4" />
-              <span>Resolution SLA: {slaResolutionBreached ? "BREACHED" : fmtDateTime(new Date(ticket.sla_resolution_at))}</span>
-            </div>
-          )}
-          {ticket.status === "hold" && ticket.hold_until && (
-            <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200">
-              <Clock className="h-4 w-4" />
-              <span>On Hold until: {fmtDateTime(new Date(ticket.hold_until))}</span>
-              {ticket.hold_duration_hours && (
-                <Badge variant="outline" className="ml-1">{ticket.hold_duration_hours}h</Badge>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* LEFT */}
-        <TicketMetaPanel
-          ticketId={ticket.id}
-          subject={ticket.subject}
-          priority={ticket.priority}
-          requesterName={ticket.requester_name}
-          assigneeText={ticket.assignee}
-          createdAt={ticket.created_at}
-          assignedAt={ticket.assigned_at}
-          attachments={[]}
-          link={ticket.link}
-        />
-
-        {/* CENTER */}
-        <Card className="p-5 flex flex-col h-[680px]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        {/* Conversation */}
+        <div className="min-w-0 xl:col-span-8">
           <TicketChat
             ticketId={id}
             ticketSubject={ticket.subject}
@@ -603,130 +675,98 @@ export default function TicketDetailsPage() {
               });
             }}
           />
-        </Card>
+        </div>
 
-        {/* RIGHT — Activity & Actions */}
-        <Card className="p-5 space-y-5 overflow-y-auto max-h-[720px]">
-          <h3 className="text-lg font-bold">Activity Log</h3>
-
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-              Ticket ID
-            </p>
-            <p className="text-xl font-extrabold tracking-tight">
-              {`PN${ticket.id.replace(/-/g, "").slice(0, 7).toUpperCase()}`}
-            </p>
-          </div>
-
-          {/* Assignee History — Overlapping Avatars */}
-          {uniqueEngineers.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Engineers ({uniqueEngineers.length})
-              </p>
-              <div className="flex items-center">
-                {uniqueEngineers.slice(0, 4).map((a, i) => (
-                  <Avatar
-                    key={a.engineer_id}
-                    className={`h-9 w-9 ring-2 ring-background shadow-sm ${i > 0 ? "-ml-2.5" : ""}`}
-                    title={a.engineer_name}
-                  >
-                    <AvatarFallback
-                      className={`text-xs font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}
-                    >
-                      {(a.engineer_name ?? "E")[0].toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                ))}
-                {uniqueEngineers.length > 4 && (
-                  <span className="-ml-2.5 flex h-9 w-9 items-center justify-center rounded-full ring-2 ring-background bg-blue-500 text-[10px] font-bold text-white shadow-sm">
-                    +{uniqueEngineers.length - 4}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="border-t border-border/60" />
+        {/* Details & Activity */}
+        <div className="flex min-w-0 flex-col gap-6 xl:col-span-4">
+          <TicketMetaPanel
+            ticketId={ticket.id}
+            subject={ticket.subject}
+            priority={ticket.priority}
+            requesterName={ticket.requester_name}
+            assigneeText={ticket.assignee}
+            createdAt={ticket.created_at}
+            assignedAt={ticket.assigned_at}
+            attachments={[]}
+            link={ticket.link}
+            description={ticket.description}
+            status={ticket.status}
+            category={ticket.category}
+            subCategory={ticket.sub_category}
+            engineers={uniqueEngineers.map((a) => ({
+              id: a.engineer_id,
+              name: a.engineer_name ?? "Engineer",
+            }))}
+            sla={{
+              responseAt: ticket.sla_response_at,
+              resolutionAt: ticket.sla_resolution_at,
+              responseBreached: slaResponseBreached,
+              resolutionBreached: slaResolutionBreached,
+              holdUntil: ticket.hold_until,
+              holdStartedAt: ticket.hold_started_at,
+              holdDurationHours: ticket.hold_duration_hours,
+            }}
+          />
 
           <TicketActivityTrail items={activityItems} />
+        </div>
+      </div>
 
-          {/* Action Buttons */}
-          {isStaff && (
-            <div className="space-y-3 pt-2">
-              {/* Close & Hold — only when ticket is active */}
-              {ticket.status !== "closed" && ticket.status !== "hold" && (
-                <>
-                  <Button className="w-full" onClick={() => setCloseOpen(true)}>
-                    Close Ticket
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setHoldOpen(true)}
-                  >
-                    Hold Ticket
-                  </Button>
-                </>
-              )}
+      {/* Close Dialog */}
+      <TicketStatusDialog
+        open={closeOpen}
+        onClose={() => setCloseOpen(false)}
+        title="Close Ticket"
+        onSubmit={async (comment) => {
+          if (!isStaff) return;
 
-              {/* Reopen — for closed or on-hold tickets */}
-              {(ticket.status === "closed" || ticket.status === "hold") && (
-                <Button
-                  variant="outline"
-                  className="w-full gap-2"
-                  onClick={handleReopen}
-                  disabled={reopenLoading}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {reopenLoading ? "Reopening..." : "Reopen Ticket"}
-                </Button>
-              )}
+          await supabase
+            .from("tickets")
+            .update({ status: "closed", closed_comment: comment })
+            .eq("id", ticket.id);
 
-              {/* Reassign — for admin/superadmin when ticket has an assignee */}
-              {(role === "admin" || role === "superadmin") && ticket.assignee && ticket.status !== "closed" && (
-                <Button
-                  variant="outline"
-                  className="w-full gap-2"
-                  onClick={() => {
-                    loadEngineers();
-                    setReassignOpen(true);
-                  }}
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Reassign Ticket
-                </Button>
-              )}
-            </div>
-          )}
-        </Card>
+          /* Notify requester */
+          await sendNotification({
+            user_id: ticket.requester_id,
+            actor_id: userId,
+            ticket_id: ticket.id,
+            type: "closed",
+            message: `closed your ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
+          });
 
-        {/* Close Dialog */}
-        <TicketStatusDialog
-          open={closeOpen}
-          onClose={() => setCloseOpen(false)}
-          title="Close Ticket"
-          onSubmit={async (comment) => {
-            if (!isStaff) return;
+          if (requesterEmail) {
+            sendEmailNotification({
+              recipient_email: requesterEmail,
+              recipient_name: ticket.requester_name,
+              actor_name: engineerName,
+              ticket_id: ticket.id,
+              ticket_subject: ticket.subject,
+              action: "closed",
+              comment,
+            });
+          }
 
-            await supabase
-              .from("tickets")
-              .update({ status: "closed", closed_comment: comment })
-              .eq("id", ticket.id);
+          /* Notify admins */
+          const { data: admins } = await supabase
+            .from("users")
+            .select("id, email, name")
+            .in("role", ["admin", "superadmin"]);
 
-            /* Notify requester */
-            await sendNotification({
-              user_id: ticket.requester_id,
+          for (const admin of admins ?? []) {
+            if (admin.id === userId) continue;
+
+            sendNotification({
+              user_id: admin.id,
               actor_id: userId,
               ticket_id: ticket.id,
               type: "closed",
-              message: `closed your ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
+              message: `closed ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
             });
 
-            if (requesterEmail) {
+            if (admin.email) {
               sendEmailNotification({
-                recipient_email: requesterEmail,
-                recipient_name: ticket.requester_name,
+                recipient_email: admin.email,
+                recipient_name: admin.name ?? "Admin",
                 actor_name: engineerName,
                 ticket_id: ticket.id,
                 ticket_subject: ticket.subject,
@@ -734,22 +774,79 @@ export default function TicketDetailsPage() {
                 comment,
               });
             }
+          }
 
-            /* Notify admins */
-            const { data: admins } = await supabase
-              .from("users")
-              .select("id, email, name")
-              .in("role", ["admin", "superadmin"]);
+          logActivity({
+            ticket_id: ticket.id,
+            actor_id: userId,
+            action: "closed",
+            details: { comment, engineer_name: engineerName },
+          });
 
-            for (const admin of admins ?? []) {
-              if (admin.id === userId) continue;
+          setCloseOpen(false);
+          await loadData();
+        }}
+      />
 
+      {/* Hold Dialog — with duration */}
+      <TicketStatusDialog
+        open={holdOpen}
+        onClose={() => setHoldOpen(false)}
+        title="Hold Ticket"
+        showHoldDuration
+        onSubmit={async (comment, holdDurationHours) => {
+          if (!isStaff) return;
+
+          const holdStartedAt = new Date().toISOString();
+          const holdUntil = holdDurationHours
+            ? new Date(Date.now() + holdDurationHours * 60 * 60 * 1000).toISOString()
+            : null;
+
+          await supabase
+            .from("tickets")
+            .update({
+              status: "hold",
+              hold_comment: comment,
+              hold_duration_hours: holdDurationHours ?? null,
+              hold_started_at: holdStartedAt,
+              hold_until: holdUntil,
+            })
+            .eq("id", ticket.id);
+
+          await sendNotification({
+            user_id: ticket.requester_id,
+            actor_id: userId,
+            ticket_id: ticket.id,
+            type: "hold",
+            message: `put your ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
+          });
+
+          if (requesterEmail) {
+            sendEmailNotification({
+              recipient_email: requesterEmail,
+              recipient_name: ticket.requester_name,
+              actor_name: engineerName,
+              ticket_id: ticket.id,
+              ticket_subject: ticket.subject,
+              action: "hold",
+              comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
+            });
+          }
+
+          /* Also notify admins about hold */
+          const { data: admins } = await supabase
+            .from("users")
+            .select("id, email, name")
+            .in("role", ["admin", "superadmin"]);
+
+          for (const admin of admins ?? []) {
+            if (admin.id !== userId) {
               sendNotification({
                 user_id: admin.id,
                 actor_id: userId,
                 ticket_id: ticket.id,
-                type: "closed",
-                message: `closed ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
+                type: "hold",
+                message: `put ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
               });
 
               if (admin.email) {
@@ -759,154 +856,80 @@ export default function TicketDetailsPage() {
                   actor_name: engineerName,
                   ticket_id: ticket.id,
                   ticket_subject: ticket.subject,
-                  action: "closed",
-                  comment,
+                  action: "hold",
+                  comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
                 });
               }
             }
+          }
 
-            logActivity({
-              ticket_id: ticket.id,
-              actor_id: userId,
-              action: "closed",
-              details: { comment, engineer_name: engineerName },
-            });
+          logActivity({
+            ticket_id: ticket.id,
+            actor_id: userId,
+            action: "hold",
+            details: {
+              hold_duration_hours: holdDurationHours,
+              reason: comment,
+              engineer_name: engineerName,
+            },
+          });
 
-            setCloseOpen(false);
-            await loadData();
-          }}
-        />
+          setHoldOpen(false);
+          await loadData();
+        }}
+      />
 
-        {/* Hold Dialog — with duration */}
-        <TicketStatusDialog
-          open={holdOpen}
-          onClose={() => setHoldOpen(false)}
-          title="Hold Ticket"
-          showHoldDuration
-          onSubmit={async (comment, holdDurationHours) => {
-            if (!isStaff) return;
-
-            const holdStartedAt = new Date().toISOString();
-            const holdUntil = holdDurationHours
-              ? new Date(Date.now() + holdDurationHours * 60 * 60 * 1000).toISOString()
-              : null;
-
-            await supabase
-              .from("tickets")
-              .update({
-                status: "hold",
-                hold_comment: comment,
-                hold_duration_hours: holdDurationHours ?? null,
-                hold_started_at: holdStartedAt,
-                hold_until: holdUntil,
-              })
-              .eq("id", ticket.id);
-
-            await sendNotification({
-              user_id: ticket.requester_id,
-              actor_id: userId,
-              ticket_id: ticket.id,
-              type: "hold",
-              message: `put your ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
-            });
-
-            if (requesterEmail) {
-              sendEmailNotification({
-                recipient_email: requesterEmail,
-                recipient_name: ticket.requester_name,
-                actor_name: engineerName,
-                ticket_id: ticket.id,
-                ticket_subject: ticket.subject,
-                action: "hold",
-                comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
-              });
-            }
-
-            /* Also notify admins about hold */
-            const { data: admins } = await supabase
-              .from("users")
-              .select("id, email, name")
-              .in("role", ["admin", "superadmin"]);
-
-            for (const admin of admins ?? []) {
-              if (admin.id !== userId) {
-                sendNotification({
-                  user_id: admin.id,
-                  actor_id: userId,
-                  ticket_id: ticket.id,
-                  type: "hold",
-                  message: `put ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
-                });
-
-                if (admin.email) {
-                  sendEmailNotification({
-                    recipient_email: admin.email,
-                    recipient_name: admin.name ?? "Admin",
-                    actor_name: engineerName,
-                    ticket_id: ticket.id,
-                    ticket_subject: ticket.subject,
-                    action: "hold",
-                    comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
-                  });
-                }
-              }
-            }
-
-            logActivity({
-              ticket_id: ticket.id,
-              actor_id: userId,
-              action: "hold",
-              details: {
-                hold_duration_hours: holdDurationHours,
-                reason: comment,
-                engineer_name: engineerName,
-              },
-            });
-
-            setHoldOpen(false);
-            await loadData();
-          }}
-        />
-
-        {/* Reassign Dialog */}
-        <Dialog open={reassignOpen} onOpenChange={setReassignOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Reassign Ticket</DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Select an engineer to reassign this ticket to:
-              </p>
-              <Select value={selectedEngineerId} onValueChange={setSelectedEngineerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select engineer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {engineers.map((eng) => (
-                    <SelectItem key={eng.id} value={eng.id}>
-                      {eng.name} ({eng.email})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setReassignOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleReassign}
-                  disabled={!selectedEngineerId || reassignLoading}
-                >
-                  {reassignLoading ? "Reassigning..." : "Reassign"}
-                </Button>
+      {/* Reassign Dialog */}
+      <Dialog open={reassignOpen} onOpenChange={setReassignOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 ring-1 ring-sky-100 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/20">
+                <UserPlus className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 text-left">
+                <DialogTitle className="text-base font-semibold text-gray-900 dark:text-white">
+                  Reassign Ticket
+                </DialogTitle>
+                <DialogDescription className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Select an engineer to reassign this ticket to:
+                </DialogDescription>
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+          </DialogHeader>
+
+          <Field>
+            <FieldLabel htmlFor="reassign-engineer" required>
+              Engineer
+            </FieldLabel>
+            <Select value={selectedEngineerId} onValueChange={setSelectedEngineerId}>
+              <SelectTrigger id="reassign-engineer" className="w-full">
+                <SelectValue placeholder="Select engineer" />
+              </SelectTrigger>
+              <SelectContent>
+                {engineers.map((eng) => (
+                  <SelectItem key={eng.id} value={eng.id}>
+                    {eng.name} ({eng.email})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReassign}
+              disabled={!selectedEngineerId || reassignLoading}
+            >
+              {reassignLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {reassignLoading ? "Reassigning..." : "Reassign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

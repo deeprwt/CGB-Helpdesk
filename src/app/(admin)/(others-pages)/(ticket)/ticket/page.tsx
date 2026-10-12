@@ -1,7 +1,11 @@
-import PageBreadcrumb from "@/components/common/PageBreadCrumb";
-import RoleBasedTickets from "@/components/user-role/RoleBasedTickets";
+import Link from "next/link";
 import { Metadata } from "next";
+import { Plus } from "lucide-react";
 import React from "react";
+
+import { PageHeader } from "@/components/common/page-header";
+import { Button } from "@/components/ui/button";
+import RoleBasedTickets from "@/components/user-role/RoleBasedTickets";
 
 export const metadata: Metadata = {
   title: "Tickets | Help Desk 360° CGB Solutions ",
@@ -10,11 +14,20 @@ export const metadata: Metadata = {
 
 export default function BlankPage() {
   return (
-    <div>
-      <PageBreadcrumb pageTitle="Latest Tickets" />
-      <div className="min-h-screen rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:px-10 xl:py-12">
-        <RoleBasedTickets />
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Tickets"
+        description="Track, pick up and resolve support requests in one place."
+        actions={
+          <Button variant="gradient" asChild>
+            <Link href="/create-ticket">
+              <Plus />
+              New Ticket
+            </Link>
+          </Button>
+        }
+      />
+      <RoleBasedTickets />
     </div>
   );
 }

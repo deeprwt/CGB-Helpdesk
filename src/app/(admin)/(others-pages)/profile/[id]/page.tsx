@@ -4,6 +4,7 @@ import * as React from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatCardSkeleton } from "@/components/common/stat-card"
 import UserInfoCard from "@/components/user-profile/UserInfoCard"
 import { UserTicketOverviewById } from "@/components/user-profile/UserTicketOverviewById"
 import { UserAddressCardById } from "@/components/user-profile/UserAddressCardById"
@@ -49,26 +50,37 @@ export default function ProfilePage() {
     }, [router])
 
     if (loading) {
-        return <Skeleton className="h-64 w-full" />
+        return (
+            <div className="flex flex-col gap-6">
+                <Skeleton className="h-36 w-full rounded-2xl" />
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                        <StatCardSkeleton key={i} />
+                    ))}
+                </div>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <Skeleton className="h-72 w-full rounded-2xl" />
+                    <Skeleton className="h-72 w-full rounded-2xl" />
+                </div>
+            </div>
+        )
     }
 
     return (
         <>
             <RoleGate allowedRoles={["engineer", "admin", "superadmin"]}>
-                <div>
-                    <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6">
-                        <h3 className="mb-5 text-lg font-semibold text-gray-800 dark:text-white/90 lg:mb-7">
-                            Profile
-                        </h3>
-                        <div className="space-y-6">
-                            <UserTicketOverviewById userId={profileId} />
-                            <UserInfoCard
-                                profileId={profileId}
-                                currentRole={currentRole}
-                            />
-                            <UserAddressCardById userId={profileId} />
-                        </div>
-                    </div>
+                {/*
+                  UserInfoCard renders the hero header (order-first, full width)
+                  plus the personal-information card. Ticket stats span both
+                  columns; info + address cards sit side by side on lg.
+                */}
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <UserTicketOverviewById userId={profileId} />
+                    <UserInfoCard
+                        profileId={profileId}
+                        currentRole={currentRole}
+                    />
+                    <UserAddressCardById userId={profileId} />
                 </div>
             </RoleGate>
         </>

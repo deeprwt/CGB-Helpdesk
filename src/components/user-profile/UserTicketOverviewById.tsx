@@ -1,10 +1,20 @@
 "use client"
 
 import * as React from "react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
-import { TrendingUp } from "lucide-react"
+import {
+  CheckCircle2,
+  FolderOpen,
+  PauseCircle,
+  Sparkles,
+  Ticket,
+  type LucideIcon,
+} from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import {
+  StatCard,
+  StatCardSkeleton,
+  type StatTone,
+} from "@/components/common/stat-card"
 
 type OverviewStat = {
   label: string
@@ -14,6 +24,17 @@ type OverviewStat = {
 type Props = {
   userId: string
 }
+
+/** Icon + tone per stat label (tones follow the ticket status palette) */
+const STAT_META: Record<string, { icon: LucideIcon; tone: StatTone }> = {
+  "Total Tickets": { icon: Ticket, tone: "indigo" },
+  "New Tickets": { icon: Sparkles, tone: "sky" },
+  "Open Tickets": { icon: FolderOpen, tone: "amber" },
+  "Hold Tickets": { icon: PauseCircle, tone: "violet" },
+  "Closed Tickets": { icon: CheckCircle2, tone: "emerald" },
+}
+
+const GRID = "grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5 lg:col-span-2"
 
 export function UserTicketOverviewById({ userId }: Props) {
   const [stats, setStats] = React.useState<OverviewStat[]>([])
@@ -78,35 +99,29 @@ export function UserTicketOverviewById({ userId }: Props) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className={GRID}>
         {Array.from({ length: 5 }).map((_, i) => (
-          <Card key={i} className="p-5">
-            <Skeleton className="h-5 w-24 mb-2" />
-            <Skeleton className="h-8 w-16" />
-          </Card>
+          <StatCardSkeleton key={i} />
         ))}
       </div>
     )
   }
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-      {stats.map((stat) => (
-        <Card key={stat.label} className="p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {stat.label}
-            </p>
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
-              <TrendingUp className="h-5 w-5 text-green-600" />
-            </span>
-          </div>
-
-          <CardContent className="p-0 mt-2">
-            <h3 className="text-3xl font-bold">{stat.value}</h3>
-          </CardContent>
-        </Card>
-      ))}
+    <div className={GRID}>
+      {stats.map((stat) => {
+        const meta = STAT_META[stat.label]
+        return (
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={meta?.icon ?? Ticket}
+            tone={meta?.tone ?? "gray"}
+            accentBar
+          />
+        )
+      })}
     </div>
   )
 }

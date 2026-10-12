@@ -43,26 +43,57 @@ export default function RoleBasedTickets() {
 
   if (loading) {
     return (
-      <Card className="p-6 space-y-6">
-        <div className="flex justify-between items-center">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-9 w-64" />
+      <Card className="gap-0 overflow-hidden py-0">
+        {/* Toolbar: title + filters + search */}
+        <div className="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between dark:border-white/10">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-4 w-64" />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Skeleton className="h-9 w-[150px]" />
+            <Skeleton className="h-9 w-[150px]" />
+            <Skeleton className="h-9 w-full sm:w-64" />
+          </div>
         </div>
 
-        <div className="flex gap-2">
-          <Skeleton className="h-9 w-24" />
-          <Skeleton className="h-9 w-24" />
+        {/* Sub-header: tabs */}
+        <div className="border-b border-gray-200 px-5 py-3 dark:border-white/10">
+          <Skeleton className="h-10 w-48 rounded-xl" />
         </div>
 
-        <div className="space-y-3">
+        {/* Column headers */}
+        <div className="flex items-center gap-6 bg-gray-50 px-4 py-3.5 dark:bg-white/[0.03]">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
+            <Skeleton key={i} className="h-3 flex-1" />
           ))}
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Skeleton className="h-9 w-24" />
-          <Skeleton className="h-9 w-24" />
+        {/* Rows */}
+        <div className="divide-y divide-gray-100 dark:divide-white/5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-6 px-4 py-3.5">
+              <Skeleton className="h-5 w-20 rounded-md" />
+              <Skeleton className="h-4 flex-1" />
+              <div className="hidden flex-1 items-center gap-2 md:flex">
+                <Skeleton className="size-7 rounded-full" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <Skeleton className="hidden h-4 w-20 sm:block" />
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-8 w-20" />
+            </div>
+          ))}
+        </div>
+
+        {/* Footer: counts + pagination */}
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 px-5 py-3 dark:border-white/10">
+          <Skeleton className="h-4 w-36" />
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-[72px]" />
+            <Skeleton className="h-9 w-24" />
+          </div>
         </div>
       </Card>
     )

@@ -11,16 +11,20 @@ import {
 } from "@/lib/org"
 import { useRouter } from "next/navigation"
 
-import { Card } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
+import { Card, CardContent } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field"
 import {
   Select,
   SelectTrigger,
@@ -39,8 +43,84 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "@/components/ui/command"
+import {
+  CalendarClock,
+  Check,
+  ChevronsUpDown,
+  Cpu,
+  Loader2,
+  Package,
+  Save,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react"
 import { toast } from "sonner"
+
+/* ---------------- UI HELPERS ---------------- */
+
+const BASIC_FIELDS: [keyof AssetFormState, string, string][] = [
+  ["asset_code", "Asset Code", "e.g. CGB-001"],
+  ["asset_type", "Asset Type", "e.g. Laptop"],
+  ["model", "Model", "e.g. Dell Latitude 5520"],
+  ["location", "Location", "e.g. Delhi Office"],
+  ["department", "Department", "e.g. IT"],
+]
+
+const DETAIL_FIELDS: [keyof AssetFormState, string, string][] = [
+  ["serial_no", "Serial No", "e.g. SN12345678"],
+  ["cpu", "CPU", "e.g. Intel i7-1165G7"],
+  ["ram", "RAM", "e.g. 16GB"],
+  ["storage", "Storage", "e.g. 512GB SSD"],
+  ["os_name", "OS Name", "e.g. Windows 11 Pro"],
+  ["mac_address", "MAC Address", "e.g. AA:BB:CC:DD:EE:FF"],
+  ["vendor", "Vendor", "e.g. Dell Technologies"],
+]
+
+const STATUS_OPTIONS: { value: AssetFormState["status"]; label: string; dot: string }[] = [
+  { value: "in_use", label: "In Use", dot: "bg-emerald-500" },
+  { value: "spare", label: "Spare", dot: "bg-amber-500" },
+  { value: "retired", label: "Retired", dot: "bg-gray-400" },
+]
+
+const emailInitials = (email: string) =>
+  email
+    .split("@")[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase() || "?"
+
+function SectionLegend({
+  icon: Icon,
+  tone,
+  title,
+  description,
+}: {
+  icon: LucideIcon
+  tone: string
+  title: string
+  description: string
+}) {
+  return (
+    <FieldLegend description={description}>
+      <span className="flex items-center gap-2.5">
+        <span
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1",
+            tone
+          )}
+        >
+          <Icon className="size-4" />
+        </span>
+        {title}
+      </span>
+    </FieldLegend>
+  )
+}
 
 /* ---------------- TYPES ---------------- */
 
@@ -84,8 +164,10 @@ export default function AssetForm({
 }: Props) {
   const router = useRouter()
 
-  const [activeTab, setActiveTab] =
-    React.useState<"basic" | "details" | "assign">("basic")
+  // The form is one page of sections (was tabs); a missing assignee
+  // scrolls to the Assignment section and shows an inline error instead.
+  const assignRef = React.useRef<HTMLDivElement>(null)
+  const [assignError, setAssignError] = React.useState<string | null>(null)
 
   const [loading, setLoading] = React.useState(false)
 
@@ -187,7 +269,8 @@ export default function AssetForm({
   const handleSubmit = async () => {
     if (!selectedUser) {
       toast.error("Please assign this asset to a user")
-      setActiveTab("assign")
+      setAssignError("Please assign this asset to a user")
+      assignRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
       return
     }
 
@@ -279,194 +362,290 @@ export default function AssetForm({
     router.push(`/assets`)
   }
 
+
   /* ---------------- UI ---------------- */
   return (
-    <Card className="p-6 max-w-5xl space-y-6">
-      <h2 className="text-xl font-semibold">
-        {mode === "create" ? "Create Asset" : "Edit Asset"}
-      </h2>
-
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="grid grid-cols-3">
-          <TabsTrigger value="basic">Asset Basics</TabsTrigger>
-          <TabsTrigger value="details">Asset Details</TabsTrigger>
-          <TabsTrigger value="assign">Assign Person</TabsTrigger>
-        </TabsList>
-
-        {/* BASIC */}
-        <TabsContent value="basic" className="mt-4 grid md:grid-cols-2 gap-4">
-          <div className="col-span-full">
-            <Label className="mb-1.5 block">Organization (optional)</Label>
-            <Select
-              value={form.organization_id || undefined}
-              onValueChange={handleOrgChange}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select organization" />
-              </SelectTrigger>
-              <SelectContent>
-                {orgs.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.name} ({o.domain})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {[
-            ["asset_code", "Asset Code"],
-            ["asset_type", "Asset Type"],
-            ["model", "Model"],
-            ["location", "Location"],
-            ["department", "Department"],
-          ].map(([key, label]) => (
-            <div key={key}>
-              <Label className="mb-1.5 block">{label}</Label>
-              <Input
-                placeholder={label}
-                value={form[key as keyof AssetFormState]}
-                onChange={(e) =>
-                  setForm({ ...form, [key]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-
-          <div>
-            <Label className="mb-1.5 block">Status</Label>
-            <Select
-              value={form.status}
-              onValueChange={(v) =>
-                setForm({
-                  ...form,
-                  status: v as AssetFormState["status"],
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="in_use">In Use</SelectItem>
-                <SelectItem value="spare">Spare</SelectItem>
-                <SelectItem value="retired">Retired</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="col-span-full flex justify-end">
-            <Button onClick={() => setActiveTab("details")}>
-              Next
-            </Button>
-          </div>
-        </TabsContent>
-
-        {/* DETAILS */}
-        <TabsContent value="details" className="mt-4 grid md:grid-cols-2 gap-4">
-          {[
-            ["serial_no", "Serial No"],
-            ["cpu", "CPU"],
-            ["ram", "RAM"],
-            ["storage", "Storage"],
-            ["os_name", "OS Name"],
-            ["mac_address", "MAC Address"],
-            ["vendor", "Vendor"],
-          ].map(([key, label]) => (
-            <div key={key}>
-              <Label className="mb-1.5 block">{label}</Label>
-              <Input
-                placeholder={label}
-                value={form[key as keyof AssetFormState]}
-                onChange={(e) =>
-                  setForm({ ...form, [key]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-
-          <div>
-            <Label className="mb-1.5 block">Purchase Date</Label>
-            <Input
-              type="date"
-              value={form.purchase_date}
-              onChange={(e) =>
-                setForm({ ...form, purchase_date: e.target.value })
-              }
-            />
-          </div>
-          <div>
-            <Label className="mb-1.5 block">Warranty Expiry</Label>
-            <Input
-              type="date"
-              value={form.warranty_expiry}
-              onChange={(e) =>
-                setForm({ ...form, warranty_expiry: e.target.value })
-              }
-            />
-          </div>
-
-          <div className="col-span-full flex justify-between">
-            <Button variant="outline" onClick={() => setActiveTab("basic")}>
-              Back
-            </Button>
-            <Button onClick={() => setActiveTab("assign")}>
-              Next
-            </Button>
-          </div>
-        </TabsContent>
-
-        {/* ASSIGN */}
-        <TabsContent value="assign" className="mt-4 space-y-4">
-          <div>
-            <Label>Assign to User</Label>
-            <p className="text-sm text-muted-foreground mt-1">
-              {selectedOrg
-                ? `Showing users from ${selectedOrg.name} (${orgUsers.length})`
-                : "Select an organization in Asset Basics to narrow this list"}
-            </p>
-          </div>
-
-          <Popover open={openAssign} onOpenChange={setOpenAssign}>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full justify-between">
-                {selectedUser ? selectedUser.email : "Search user"}
-              </Button>
-            </PopoverTrigger>
-
-            <PopoverContent className="w-full p-0">
-              <Command>
-                <CommandInput placeholder="Search email..." />
-                <CommandEmpty>No user found</CommandEmpty>
-                <CommandGroup>
-                  {orgUsers.map((u) => (
-                    <CommandItem
-                      key={u.id}
-                      value={u.email}
-                      onSelect={() => handleUserSelect(u)}
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-6 xl:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
+          {/* BASICS */}
+          <Card>
+            <CardContent>
+              <FieldSet>
+                <SectionLegend
+                  icon={Package}
+                  tone="bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20"
+                  title="Asset basics"
+                  description="Identity, ownership and where the asset lives."
+                />
+                <FieldGroup className="sm:grid-cols-2">
+                  <Field className="sm:col-span-2">
+                    <FieldLabel htmlFor="asset-organization">
+                      Organization
+                      <span className="font-normal text-gray-400 dark:text-gray-500">
+                        (optional)
+                      </span>
+                    </FieldLabel>
+                    <Select
+                      value={form.organization_id || undefined}
+                      onValueChange={handleOrgChange}
                     >
-                      {u.email}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </Command>
-            </PopoverContent>
-          </Popover>
+                      <SelectTrigger id="asset-organization" className="w-full">
+                        <SelectValue placeholder="Select organization" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orgs.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.name} ({o.domain})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
 
-          <div className="flex justify-between">
-            <Button variant="outline" onClick={() => setActiveTab("details")}>
-              Back
-            </Button>
-            <Button onClick={handleSubmit} disabled={loading}>
-              {loading
-                ? "Saving..."
-                : mode === "create"
+                  {BASIC_FIELDS.map(([key, label, placeholder]) => (
+                    <Field key={key}>
+                      <FieldLabel htmlFor={`asset-${key}`}>{label}</FieldLabel>
+                      <Input
+                        id={`asset-${key}`}
+                        placeholder={placeholder}
+                        value={form[key]}
+                        onChange={(e) =>
+                          setForm({ ...form, [key]: e.target.value })
+                        }
+                      />
+                    </Field>
+                  ))}
+
+                  <Field>
+                    <FieldLabel htmlFor="asset-status">Status</FieldLabel>
+                    <Select
+                      value={form.status}
+                      onValueChange={(v) =>
+                        setForm({
+                          ...form,
+                          status: v as AssetFormState["status"],
+                        })
+                      }
+                    >
+                      <SelectTrigger id="asset-status" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((s) => (
+                          <SelectItem key={s.value} value={s.value}>
+                            <span className={cn("size-2 rounded-full", s.dot)} />
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+            </CardContent>
+          </Card>
+
+          {/* DETAILS */}
+          <Card>
+            <CardContent>
+              <FieldSet>
+                <SectionLegend
+                  icon={Cpu}
+                  tone="bg-violet-50 text-violet-600 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/20"
+                  title="Asset details"
+                  description="Hardware specification and vendor. Empty fields are skipped."
+                />
+                <FieldGroup className="sm:grid-cols-2">
+                  {DETAIL_FIELDS.map(([key, label, placeholder]) => (
+                    <Field key={key}>
+                      <FieldLabel htmlFor={`asset-${key}`}>{label}</FieldLabel>
+                      <Input
+                        id={`asset-${key}`}
+                        placeholder={placeholder}
+                        value={form[key]}
+                        onChange={(e) =>
+                          setForm({ ...form, [key]: e.target.value })
+                        }
+                        className={cn(
+                          (key === "serial_no" || key === "mac_address") &&
+                            "font-mono"
+                        )}
+                      />
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </FieldSet>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-6">
+          {/* ASSIGN */}
+          <Card ref={assignRef}>
+            <CardContent>
+              <FieldSet>
+                <SectionLegend
+                  icon={UserRound}
+                  tone="bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20"
+                  title="Assign person"
+                  description="Every asset must be assigned to a user."
+                />
+                <Field>
+                  <FieldLabel htmlFor="asset-assignee" required>
+                    Assign to User
+                  </FieldLabel>
+                  <Popover open={openAssign} onOpenChange={setOpenAssign}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="asset-assignee"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={openAssign}
+                        aria-invalid={!selectedUser && !!assignError}
+                        className="w-full justify-between font-normal"
+                      >
+                        {selectedUser ? (
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Avatar className="size-6">
+                              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+                                {emailInitials(selectedUser.email)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="truncate text-gray-900 dark:text-white">
+                              {selectedUser.email}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 dark:text-gray-500">
+                            Search user
+                          </span>
+                        )}
+                        <ChevronsUpDown className="size-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+
+                    <PopoverContent
+                      align="start"
+                      className="w-(--radix-popover-trigger-width) p-0"
+                    >
+                      <Command>
+                        <CommandInput placeholder="Search email..." />
+                        <CommandList>
+                          <CommandEmpty>No user found</CommandEmpty>
+                          <CommandGroup>
+                            {orgUsers.map((u) => (
+                              <CommandItem
+                                key={u.id}
+                                value={u.email}
+                                onSelect={() => handleUserSelect(u)}
+                              >
+                                <Check
+                                  className={cn(
+                                    "size-4 text-indigo-600 dark:text-indigo-300",
+                                    selectedUser?.id === u.id
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                                <span className="truncate">{u.email}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <FieldDescription>
+                    {selectedOrg
+                      ? `Showing users from ${selectedOrg.name} (${orgUsers.length})`
+                      : "Select an organization in Asset basics to narrow this list"}
+                  </FieldDescription>
+                  <FieldError>{!selectedUser ? assignError : null}</FieldError>
+                </Field>
+              </FieldSet>
+            </CardContent>
+          </Card>
+
+          {/* DATES */}
+          <Card>
+            <CardContent>
+              <FieldSet>
+                <SectionLegend
+                  icon={CalendarClock}
+                  tone="bg-amber-50 text-amber-600 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/20"
+                  title="Purchase & warranty"
+                  description="Used for warranty tracking and expiry alerts."
+                />
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="asset-purchase_date">
+                      Purchase Date
+                    </FieldLabel>
+                    <Input
+                      id="asset-purchase_date"
+                      type="date"
+                      value={form.purchase_date}
+                      onChange={(e) =>
+                        setForm({ ...form, purchase_date: e.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="asset-warranty_expiry">
+                      Warranty Expiry
+                    </FieldLabel>
+                    <Input
+                      id="asset-warranty_expiry"
+                      type="date"
+                      value={form.warranty_expiry}
+                      onChange={(e) =>
+                        setForm({ ...form, warranty_expiry: e.target.value })
+                      }
+                    />
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* FOOTER */}
+      <Card className="sticky bottom-4 z-20 flex-col gap-3 bg-white/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between dark:bg-gray-900/90">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {mode === "create"
+            ? "The asset is created and assigned when you save."
+            : "Changes are applied when you save."}
+        </p>
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={() => router.push("/assets")}
+            disabled={loading}
+            className="flex-1 sm:flex-none"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="gradient"
+            onClick={handleSubmit}
+            disabled={loading}
+            className="flex-1 sm:flex-none"
+          >
+            {loading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            {loading
+              ? "Saving..."
+              : mode === "create"
                 ? "Create Asset"
                 : "Update Asset"}
-            </Button>
-          </div>
-        </TabsContent>
-      </Tabs>
-    </Card>
+          </Button>
+        </div>
+      </Card>
+    </div>
   )
 }

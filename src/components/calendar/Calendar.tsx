@@ -10,14 +10,41 @@ import {
   EventClickArg,
   EventContentArg,
 } from "@fullcalendar/core";
+import { CalendarCog, CalendarPlus } from "lucide-react";
 import { useModal } from "@/hooks/useModal";
-import { Modal } from "@/components/ui/modal";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 interface CalendarEvent extends EventInput {
   extendedProps: {
     calendar: string;
   };
 }
+
+// Colour dot for each event level — matches the .fc-bg-* event colours in globals.css
+const EVENT_DOT_CLASS: Record<string, string> = {
+  danger:
+    "border-error-500 data-[state=checked]:bg-error-500 dark:data-[state=checked]:bg-error-500",
+  success:
+    "border-success-500 data-[state=checked]:bg-success-500 dark:data-[state=checked]:bg-success-500",
+  primary:
+    "border-brand-500 data-[state=checked]:bg-brand-500 dark:data-[state=checked]:bg-brand-500",
+  warning:
+    "border-orange-500 data-[state=checked]:bg-orange-500 dark:data-[state=checked]:bg-orange-500",
+};
 
 const Calendar: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
@@ -121,7 +148,7 @@ const Calendar: React.FC = () => {
   };
 
   return (
-    <div className="rounded-2xl border  border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+    <Card className="gap-0 py-0">
       <div className="custom-calendar">
         <FullCalendar
           ref={calendarRef}
@@ -145,125 +172,107 @@ const Calendar: React.FC = () => {
           }}
         />
       </div>
-      <Modal
-        isOpen={isOpen}
-        onClose={closeModal}
-        className="max-w-[700px] p-6 lg:p-10"
+      <Dialog
+        open={isOpen}
+        onOpenChange={(open) => {
+          if (!open) closeModal();
+        }}
       >
-        <div className="flex flex-col px-2 overflow-y-auto custom-scrollbar">
-          <div>
-            <h5 className="mb-2 font-semibold text-gray-800 modal-title text-theme-xl dark:text-white/90 lg:text-2xl">
-              {selectedEvent ? "Edit Event" : "Add Event"}
-            </h5>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Plan your next big moment: schedule or edit an event to stay on
-              track
-            </p>
-          </div>
-          <div className="mt-8">
-            <div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                  Event Title
-                </label>
-                <input
-                  id="event-title"
-                  type="text"
-                  value={eventTitle}
-                  onChange={(e) => setEventTitle(e.target.value)}
-                  className="dark:bg-dark-900 h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
-                />
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[600px]">
+          <DialogHeader>
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+                {selectedEvent ? (
+                  <CalendarCog className="h-5 w-5" />
+                ) : (
+                  <CalendarPlus className="h-5 w-5" />
+                )}
+              </span>
+              <div className="flex min-w-0 flex-col gap-1.5 text-left">
+                <DialogTitle className="text-gray-900 dark:text-white">
+                  {selectedEvent ? "Edit Event" : "Add Event"}
+                </DialogTitle>
+                <DialogDescription className="text-gray-500 dark:text-gray-400">
+                  Plan your next big moment: schedule or edit an event to stay on
+                  track
+                </DialogDescription>
               </div>
             </div>
-            <div className="mt-6">
-              <label className="block mb-4 text-sm font-medium text-gray-700 dark:text-gray-400">
-                Event Color
-              </label>
-              <div className="flex flex-wrap items-center gap-4 sm:gap-5">
-                {Object.entries(calendarsEvents).map(([key, value]) => (
-                  <div key={key} className="n-chk">
-                    <div
-                      className={`form-check form-check-${value} form-check-inline`}
-                    >
-                      <label
-                        className="flex items-center text-sm text-gray-700 form-check-label dark:text-gray-400"
-                        htmlFor={`modal${key}`}
-                      >
-                        <span className="relative">
-                          <input
-                            className="sr-only form-check-input"
-                            type="radio"
-                            name="event-level"
-                            value={key}
-                            id={`modal${key}`}
-                            checked={eventLevel === key}
-                            onChange={() => setEventLevel(key)}
-                          />
-                          <span className="flex items-center justify-center w-5 h-5 mr-2 border border-gray-300 rounded-full box dark:border-gray-700">
-                            <span
-                              className={`h-2 w-2 rounded-full bg-white ${
-                                eventLevel === key ? "block" : "hidden"
-                              }`}  
-                            ></span>
-                          </span>
-                        </span>
-                        {key}
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          </DialogHeader>
 
-            <div className="mt-6">
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Enter Start Date
-              </label>
-              <div className="relative">
-                <input
+          <FieldGroup className="py-2">
+            <Field>
+              <FieldLabel htmlFor="event-title">Event Title</FieldLabel>
+              <Input
+                id="event-title"
+                type="text"
+                value={eventTitle}
+                onChange={(e) => setEventTitle(e.target.value)}
+                placeholder="e.g. Quarterly review"
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel id="event-color-label">Event Color</FieldLabel>
+              <RadioGroup
+                aria-labelledby="event-color-label"
+                value={eventLevel}
+                onValueChange={setEventLevel}
+                className="flex flex-wrap items-center gap-2.5"
+              >
+                {Object.entries(calendarsEvents).map(([key, value]) => (
+                  <Label
+                    key={key}
+                    htmlFor={`modal${key}`}
+                    className="mb-0 cursor-pointer gap-2 rounded-full border border-gray-200 px-3 py-1.5 font-normal text-gray-700 transition-colors hover:bg-gray-50 has-[[data-state=checked]]:border-indigo-300 has-[[data-state=checked]]:bg-indigo-50/60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5 dark:has-[[data-state=checked]]:border-indigo-500/40 dark:has-[[data-state=checked]]:bg-indigo-500/10"
+                  >
+                    <RadioGroupItem
+                      value={key}
+                      id={`modal${key}`}
+                      className={cn(
+                        "size-5 border-2 text-white [&_svg]:fill-white",
+                        EVENT_DOT_CLASS[value]
+                      )}
+                    />
+                    {key}
+                  </Label>
+                ))}
+              </RadioGroup>
+            </Field>
+
+            <FieldGroup className="sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="event-start-date">Enter Start Date</FieldLabel>
+                <Input
                   id="event-start-date"
                   type="date"
                   value={eventStartDate}
                   onChange={(e) => setEventStartDate(e.target.value)}
-                  className="dark:bg-dark-900 h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent bg-none px-4 py-2.5 pl-4 pr-11 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
                 />
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Enter End Date
-              </label>
-              <div className="relative">
-                <input
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="event-end-date">Enter End Date</FieldLabel>
+                <Input
                   id="event-end-date"
                   type="date"
                   value={eventEndDate}
                   onChange={(e) => setEventEndDate(e.target.value)}
-                  className="dark:bg-dark-900 h-11 w-full appearance-none rounded-lg border border-gray-300 bg-transparent bg-none px-4 py-2.5 pl-4 pr-11 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
                 />
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 mt-6 modal-footer sm:justify-end">
-            <button
-              onClick={closeModal}
-              type="button"
-              className="flex w-full justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] sm:w-auto"
-            >
+              </Field>
+            </FieldGroup>
+          </FieldGroup>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeModal}>
               Close
-            </button>
-            <button
-              onClick={handleAddOrUpdateEvent}
-              type="button"
-              className="btn btn-success btn-update-event flex w-full justify-center rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 sm:w-auto"
-            >
+            </Button>
+            <Button type="button" variant="gradient" onClick={handleAddOrUpdateEvent}>
               {selectedEvent ? "Update Changes" : "Add Event"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-    </div>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 };
 

@@ -1,465 +1,297 @@
 "use client";
-import React, { useEffect, useRef, useState,useCallback } from "react";
+
+import React, { useCallback, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useSidebar } from "../context/SidebarContext";
+import { toast } from "sonner";
 import {
-  BoxCubeIcon,
-  CalenderIcon,
-  ChevronDownIcon,
-  GridIcon,
-  HorizontaLDots,
-  ListIcon,
-  PageIcon,
-  PieChartIcon,
-  PlugInIcon,
-  TableIcon,
-  UserCircleIcon,
-} from "../icons/index";
-import SidebarWidget from "./SidebarWidget";
-import { supabase } from "@/lib/supabaseClient";
+  LayoutDashboard,
+  Ticket,
+  UserCircle2,
+  Users,
+  Boxes,
+  Building2,
+  ShieldCheck,
+  Plus,
+  LogOut,
+  MoreVertical,
+  type LucideIcon,
+} from "lucide-react";
 
-type Role = "user" | "engineer" | "admin" | "superadmin"
+import { useSidebar } from "../context/SidebarContext";
+import { supabase } from "@/lib/supabaseClient";
+import { cn } from "@/lib/utils";
+import { useCurrentUser, getInitials, roleLabel, type AppRole } from "@/hooks/useCurrentUser";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type NavItem = {
-  name: string
-  icon: React.ReactNode
-  path?: string
-  roles?: Role[] 
-  subItems?: {
-    name: string
-    path: string
-    roles?: Role[]
-    pro?: boolean
-    new?: boolean
-  }[]
-}
+  name: string;
+  icon: LucideIcon;
+  path: string;
+  /** Roles that can see this item */
+  roles: AppRole[];
+};
 
+type NavSection = { title: string; items: NavItem[] };
 
-const navItems: NavItem[] = [
+const ALL: AppRole[] = ["user", "engineer", "admin", "superadmin"];
+const STAFF: AppRole[] = ["engineer", "admin", "superadmin"];
+
+const NAV_SECTIONS: NavSection[] = [
   {
-    icon: <GridIcon />,
-    name: "Dashboard",
-     roles: ["user", "engineer", "admin", "superadmin"],
-    subItems: [{ name: "Overview", path: "/", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
-  },
-  {
-    icon: <CalenderIcon />,
-    name: "Tickets",
-    path: "/ticket",
-   roles: ["user", "engineer", "admin", "superadmin"],
-  },
-  {
-    icon: <UserCircleIcon />,
-    name: "User Profile",
-    path: "/profile",
-     roles: ["user", "engineer", "admin", "superadmin"],
-  },
-  { 
-    icon: <UserCircleIcon />,
-    name: "User & Role",
-    path: "/user",
-     roles: ["engineer", "admin", "superadmin"],
-  },
-    {
-    icon: <UserCircleIcon />,
-    name: "Assets",
-    path: "/assets",
-     roles: ["engineer", "admin", "superadmin"],
-  },
-  {
-    icon: <PlugInIcon />,
-    name: "Super Admin",
-    roles: ["superadmin"],
-    subItems: [
-      { name: "Organizations", path: "/super-admin/organizations", roles: ["superadmin"] },
-      { name: "Access Control", path: "/super-admin/access-control", roles: ["superadmin"] },
+    title: "Menu",
+    items: [
+      { name: "Dashboard", icon: LayoutDashboard, path: "/", roles: ALL },
+      { name: "Tickets", icon: Ticket, path: "/ticket", roles: ALL },
+      { name: "User Profile", icon: UserCircle2, path: "/profile", roles: ALL },
+      { name: "User & Role", icon: Users, path: "/user", roles: STAFF },
+      { name: "Assets", icon: Boxes, path: "/assets", roles: STAFF },
     ],
   },
-  // {
-  //   name: "Forms",
-  //   icon: <ListIcon />,
-  //    roles: ["user", "engineer", "admin", "superadmin"],
-  //   subItems: [{ name: "Form Elements", path: "/form-elements", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
-  // },
-  // {
-  //   name: "Tables",
-  //   icon: <TableIcon />,
-  //    roles: ["user", "engineer", "admin", "superadmin"],
-  //   subItems: [{ name: "Basic Tables", path: "/basic-tables", pro: false, roles: ["user", "engineer", "admin", "superadmin"], }],
-  // },
-  // {
-  //   name: "Pages",
-  //   icon: <PageIcon />,
-  //    roles: ["user", "engineer", "admin", "superadmin"],
-  //   subItems: [
-  //     { name: "Blank Page", path: "/blank", pro: false, roles: ["user", "engineer", "admin", "superadmin"], },
-  //     { name: "404 Error", path: "/error-404", pro: false, roles: ["user", "engineer", "admin", "superadmin"], },
-  //   ],
-  // },
-];
-
-const othersItems: NavItem[] = [
-  // {
-  //   icon: <PieChartIcon />,
-  //   name: "Charts",
-  //   subItems: [
-  //     { name: "Line Chart", path: "/line-chart", pro: false },
-  //     { name: "Bar Chart", path: "/bar-chart", pro: false },
-  //   ],
-  // },
-  // {
-  //   icon: <BoxCubeIcon />,
-  //   name: "UI Elements",
-  //   subItems: [
-  //     { name: "Alerts", path: "/alerts", pro: false },
-  //     { name: "Avatar", path: "/avatars", pro: false },
-  //     { name: "Badge", path: "/badge", pro: false },
-  //     { name: "Buttons", path: "/buttons", pro: false },
-  //     { name: "Images", path: "/images", pro: false },
-  //     { name: "Videos", path: "/videos", pro: false },
-  //   ],
-  // },
-  // {
-  //   icon: <PlugInIcon />,
-  //   name: "Authentication",
-  //   subItems: [
-  //     { name: "Sign In", path: "/signin", pro: false },
-  //     { name: "Sign Up", path: "/signup", pro: false },
-  //   ],
-  // },
+  {
+    title: "Super Admin",
+    items: [
+      { name: "Organizations", icon: Building2, path: "/super-admin/organizations", roles: ["superadmin"] },
+      { name: "Access Control", icon: ShieldCheck, path: "/super-admin/access-control", roles: ["superadmin"] },
+    ],
+  },
 ];
 
 const AppSidebar: React.FC = () => {
-  const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
+  const { isExpanded, isMobileOpen, isHovered, setIsHovered, toggleMobileSidebar } = useSidebar();
+  const { user, loading } = useCurrentUser();
   const pathname = usePathname();
-  const [role, setRole] = useState<Role | null>(null)
 
-useEffect(() => {
-  let cancelled = false
+  // Expanded when pinned open, hovered, or showing as the mobile drawer
+  const open = isExpanded || isHovered || isMobileOpen;
 
-  const fetchRole = async (userId: string) => {
-    const { data } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", userId)
-      .single()
-    if (!cancelled) setRole((data?.role as Role) ?? "user")
-  }
-
-  // Immediate fetch — covers Strict Mode double-mount where INITIAL_SESSION is missed
-  supabase.auth.getUser().then(({ data: { user } }) => {
-    if (user) fetchRole(user.id)
-  })
-
-  // Also listen for auth state changes (sign-in, sign-out, token refresh)
-  const { data: { subscription } } = supabase.auth.onAuthStateChange(
-    (_event, session) => {
-      if (session?.user) {
-        fetchRole(session.user.id)
-      } else if (!cancelled) {
-        setRole(null)
-      }
-    }
-  )
-
-  return () => {
-    cancelled = true
-    subscription.unsubscribe()
-  }
-}, [])
-
-
-const filterByRole = (items: NavItem[], role: Role) =>
-  items
-    .filter((item) => !item.roles || item.roles.includes(role))
-    .map((item) => ({
-      ...item,
-      subItems: item.subItems?.filter(
-        (sub) => !sub.roles || sub.roles.includes(role)
-      ),
-    }));
-
-
-  const renderMenuItems = (
-    navItems: NavItem[],
-    menuType: "main" | "others"
-  ) => (
-    <ul className="flex flex-col gap-4">
-      {navItems.map((nav, index) => (
-        <li key={nav.name}>
-          {nav.subItems ? (
-            <button
-              onClick={() => handleSubmenuToggle(index, menuType)}
-              className={`menu-item group  ${
-                openSubmenu?.type === menuType && openSubmenu?.index === index
-                  ? "menu-item-active"
-                  : "menu-item-inactive"
-              } cursor-pointer ${
-                !isExpanded && !isHovered
-                  ? "lg:justify-center"
-                  : "lg:justify-start"
-              }`}
-            >
-              <span
-                className={` ${
-                  openSubmenu?.type === menuType && openSubmenu?.index === index
-                    ? "menu-item-icon-active"
-                    : "menu-item-icon-inactive"
-                }`}
-              >
-                {nav.icon}
-              </span>
-              {(isExpanded || isHovered || isMobileOpen) && (
-                <span className={`menu-item-text`}>{nav.name}</span>
-              )}
-              {(isExpanded || isHovered || isMobileOpen) && (
-                <ChevronDownIcon
-                  className={`ml-auto w-5 h-5 transition-transform duration-200  ${
-                    openSubmenu?.type === menuType &&
-                    openSubmenu?.index === index
-                      ? "rotate-180 text-brand-500"
-                      : ""
-                  }`}
-                />
-              )}
-            </button>
-          ) : (
-            nav.path && (
-              <Link
-                href={nav.path}
-                className={`menu-item group ${
-                  isActive(nav.path) ? "menu-item-active" : "menu-item-inactive"
-                }`}
-              >
-                <span
-                  className={`${
-                    isActive(nav.path)
-                      ? "menu-item-icon-active"
-                      : "menu-item-icon-inactive"
-                  }`}
-                >
-                  {nav.icon}
-                </span>
-                {(isExpanded || isHovered || isMobileOpen) && (
-                  <span className={`menu-item-text`}>{nav.name}</span>
-                )}
-              </Link>
-            )
-          )}
-          {nav.subItems && (isExpanded || isHovered || isMobileOpen) && (
-            <div
-              ref={(el) => {
-                subMenuRefs.current[`${menuType}-${index}`] = el;
-              }}
-              className="overflow-hidden transition-all duration-300"
-              style={{
-                height:
-                  openSubmenu?.type === menuType && openSubmenu?.index === index
-                    ? `${subMenuHeight[`${menuType}-${index}`]}px`
-                    : "0px",
-              }}
-            >
-              <ul className="mt-2 space-y-1 ml-9">
-                {nav.subItems.map((subItem) => (
-                  <li key={subItem.name}>
-                    <Link
-                      href={subItem.path}
-                      className={`menu-dropdown-item ${
-                        isActive(subItem.path)
-                          ? "menu-dropdown-item-active"
-                          : "menu-dropdown-item-inactive"
-                      }`}
-                    >
-                      {subItem.name}
-                      <span className="flex items-center gap-1 ml-auto">
-                        {subItem.new && (
-                          <span
-                            className={`ml-auto ${
-                              isActive(subItem.path)
-                                ? "menu-dropdown-badge-active"
-                                : "menu-dropdown-badge-inactive"
-                            } menu-dropdown-badge `}
-                          >
-                            new
-                          </span>
-                        )}
-                        {subItem.pro && (
-                          <span
-                            className={`ml-auto ${
-                              isActive(subItem.path)
-                                ? "menu-dropdown-badge-active"
-                                : "menu-dropdown-badge-inactive"
-                            } menu-dropdown-badge `}
-                          >
-                            pro
-                          </span>
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
+  const sections = useMemo(
+    () =>
+      user
+        ? NAV_SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => i.roles.includes(user.role)) })).filter(
+            (s) => s.items.length > 0,
+          )
+        : [],
+    [user],
   );
 
-  const [openSubmenu, setOpenSubmenu] = useState<{
-    type: "main" | "others";
-    index: number;
-  } | null>(null);
-  const [subMenuHeight, setSubMenuHeight] = useState<Record<string, number>>(
-    {}
+  const isActive = useCallback(
+    (path: string) => (path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(path + "/")),
+    [pathname],
   );
-  const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // const isActive = (path: string) => path === pathname;
-   const isActive = useCallback((path: string) => path === pathname, [pathname]);
+  const handleLinkClick = useCallback(() => {
+    if (isMobileOpen) toggleMobileSidebar();
+  }, [isMobileOpen, toggleMobileSidebar]);
 
-  useEffect(() => {
-    // Check if the current path matches any submenu item
-    let submenuMatched = false;
-    ["main", "others"].forEach((menuType) => {
-      const items = menuType === "main" ? navItems : othersItems;
-      items.forEach((nav, index) => {
-        if (nav.subItems) {
-          nav.subItems.forEach((subItem) => {
-            if (isActive(subItem.path)) {
-              setOpenSubmenu({
-                type: menuType as "main" | "others",
-                index,
-              });
-              submenuMatched = true;
-            }
-          });
-        }
-      });
-    });
-
-    // If no submenu item matches, close the open submenu
-    // if (!submenuMatched) {
-    //   setOpenSubmenu(null);
-    // }
-  }, [pathname,isActive]);
-
-  useEffect(() => {
-    // Set the height of the submenu items when the submenu is opened
-    if (openSubmenu !== null) {
-      const key = `${openSubmenu.type}-${openSubmenu.index}`;
-      if (subMenuRefs.current[key]) {
-        setSubMenuHeight((prevHeights) => ({
-          ...prevHeights,
-          [key]: subMenuRefs.current[key]?.scrollHeight || 0,
-        }));
-      }
-    }
-  }, [openSubmenu]);
-
-  const handleSubmenuToggle = (index: number, menuType: "main" | "others") => {
-    setOpenSubmenu((prevOpenSubmenu) => {
-      if (
-        prevOpenSubmenu &&
-        prevOpenSubmenu.type === menuType &&
-        prevOpenSubmenu.index === index
-      ) {
-        return null;
-      }
-      return { type: menuType, index };
-    });
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error("Sign out error:", error.message);
+    else toast.success("Signed out successfully");
   };
+
+  const accountMenu = (
+    <DropdownMenuContent align="end" side={open ? "top" : "right"} className="w-56">
+      <DropdownMenuLabel className="font-normal">
+        <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{user?.full_name}</p>
+        <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem asChild>
+        <Link href="/profile" onClick={handleLinkClick}>
+          <UserCircle2 /> My Profile
+        </Link>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onClick={handleSignOut}>
+        <LogOut /> Sign out
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
 
   return (
     <aside
-      className={`fixed mt-16 flex flex-col lg:mt-0 top-0 px-5 left-0 bg-white dark:bg-gray-900 dark:border-gray-800 text-gray-900 h-screen transition-all duration-300 ease-in-out z-50 border-r border-gray-200 
-        ${
-          isExpanded || isMobileOpen
-            ? "w-[290px]"
-            : isHovered
-            ? "w-[290px]"
-            : "w-[90px]"
-        }
-        ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
-        lg:translate-x-0`}
       onMouseEnter={() => !isExpanded && setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      className={cn(
+        "fixed left-0 top-0 z-50 mt-16 flex h-[calc(100vh-4rem)] flex-col border-r border-gray-200/80 bg-white text-gray-900 transition-[width,transform] duration-200 ease-out lg:mt-0 lg:h-screen",
+        "dark:border-white/10 dark:bg-gray-950 dark:text-gray-100",
+        open ? "w-[260px]" : "w-[84px]",
+        isMobileOpen ? "translate-x-0" : "-translate-x-full",
+        "lg:translate-x-0",
+      )}
     >
-      <div
-        className={`py-8 flex  ${
-          !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
-        }`}
-      >
-        <Link href="/">
-          {isExpanded || isHovered || isMobileOpen ? (
+      {/* ── Brand ─────────────────────────────────────────────────────── */}
+      <div className={cn("hidden h-[72px] shrink-0 items-center px-5 lg:flex", open ? "justify-start" : "justify-center")}>
+        <Link href="/" onClick={handleLinkClick} className="flex items-center gap-2">
+          {open ? (
             <>
-              <Image
-                className="dark:hidden"
-                src="/images/logo/logo.svg"
-                alt="Logo"
-                width={150}
-                height={40}
-              />
-              <Image
-                className="hidden dark:block"
-                src="/images/logo/logo-dark.svg"
-                alt="Logo"
-                width={150}
-                height={40}
-              />
+              <Image className="dark:hidden" src="/images/logo/logo.svg" alt="Logo" width={150} height={40} priority />
+              <Image className="hidden dark:block" src="/images/logo/logo-dark.svg" alt="Logo" width={150} height={40} priority />
             </>
           ) : (
-            <Image
-              src="/images/logo/logo-icon.svg"
-              alt="Logo"
-              width={32}
-              height={32}
-            />
+            <Image src="/images/logo/logo-icon.svg" alt="Logo" width={32} height={32} priority />
           )}
         </Link>
       </div>
-      <div className="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar">
-        <nav className="mb-6">
-          <div className="flex flex-col gap-4">
-            <div>
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "Menu"
-                ) : (
-                  <HorizontaLDots />
-                )}
-              </h2>
-              {role && renderMenuItems(filterByRole(navItems, role), "main")}
-            </div>
 
-            <div className="">
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "Others"
-                ) : (
-                  <HorizontaLDots />
-                )}
-              </h2>
-              {renderMenuItems(othersItems, "others")}
-            </div>
+      {/* ── Nav ───────────────────────────────────────────────────────── */}
+      <nav className="no-scrollbar flex-1 overflow-y-auto px-3 pb-4 pt-4 lg:pt-2">
+        {loading && (
+          <div className="flex flex-col gap-2 px-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className={cn("h-10 rounded-xl", open ? "w-full" : "mx-auto w-10")} />
+            ))}
           </div>
-        </nav>
-        {isExpanded || isHovered || isMobileOpen ? <SidebarWidget /> : null}
+        )}
+
+        {sections.map((section) => (
+          <div key={section.title} className="mb-5 last:mb-0">
+            <p
+              className={cn(
+                "mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400",
+                !open && "text-center",
+              )}
+            >
+              {open ? section.title : "•••"}
+            </p>
+
+            <ul className="flex flex-col gap-0.5">
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const active = isActive(item.path);
+                const link = (
+                  <Link
+                    href={item.path}
+                    onClick={handleLinkClick}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "group relative flex items-center rounded-xl transition-all duration-150 ease-out",
+                      open ? "gap-3 px-3 py-2.5" : "mx-auto h-10 w-10 justify-center",
+                      active
+                        ? "bg-gradient-to-r from-indigo-500/10 to-purple-500/10 text-indigo-600 dark:from-indigo-500/15 dark:to-purple-500/15 dark:text-indigo-300"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white",
+                    )}
+                  >
+                    {active && open && (
+                      <span
+                        aria-hidden
+                        className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-indigo-500 to-purple-500"
+                      />
+                    )}
+                    <span
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-150",
+                        active
+                          ? "bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-sm shadow-indigo-500/30"
+                          : "bg-gray-100 text-gray-500 group-hover:bg-gray-200 group-hover:text-gray-700 dark:bg-white/5 dark:text-gray-400 dark:group-hover:bg-white/10",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    {open && (
+                      <span className={cn("flex-1 truncate text-sm font-medium", active && "font-semibold")}>
+                        {item.name}
+                      </span>
+                    )}
+                  </Link>
+                );
+
+                return (
+                  <li key={item.path}>
+                    {open ? (
+                      link
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{link}</TooltipTrigger>
+                        <TooltipContent side="right">{item.name}</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      {/* ── New Ticket CTA ───────────────────────────────────────────── */}
+      <div className={cn("px-3 pb-3", !open && "flex justify-center")}>
+        <Button
+          asChild
+          variant="gradient"
+          className={cn(
+            "group relative overflow-hidden rounded-xl",
+            open ? "h-10 w-full justify-start gap-2 px-3 font-semibold" : "h-10 w-10 p-0",
+          )}
+        >
+          <Link href="/create-ticket" onClick={handleLinkClick} title={!open ? "New Ticket" : undefined}>
+            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+            <Plus className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:rotate-90" />
+            {open && <span>New Ticket</span>}
+          </Link>
+        </Button>
       </div>
+
+      {/* ── User footer ──────────────────────────────────────────────── */}
+      {user && (
+        <div className={cn("border-t border-gray-200/80 p-3 dark:border-white/10", !open && "flex justify-center")}>
+          {open ? (
+            <div className="flex items-center gap-3 rounded-xl bg-gray-50 p-2.5 dark:bg-white/5">
+              <div className="relative shrink-0">
+                <Avatar className="h-9 w-9">
+                  <AvatarImage src={user.avatar_url ?? undefined} />
+                  <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                    {getInitials(user.full_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-gray-50 dark:ring-gray-950" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{user.full_name}</p>
+                <p className="truncate text-[11px] font-medium uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
+                  {roleLabel(user.role)}
+                </p>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Account menu" className="text-gray-400">
+                    <MoreVertical />
+                  </Button>
+                </DropdownMenuTrigger>
+                {accountMenu}
+              </DropdownMenu>
+            </div>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon-lg" aria-label="Account menu" className="relative rounded-full p-0">
+                  <Avatar className="h-9 w-9">
+                    <AvatarImage src={user.avatar_url ?? undefined} />
+                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                      {getInitials(user.full_name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-gray-950" />
+                </Button>
+              </DropdownMenuTrigger>
+              {accountMenu}
+            </DropdownMenu>
+          )}
+        </div>
+      )}
     </aside>
   );
 };

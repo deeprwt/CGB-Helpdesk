@@ -1,29 +1,43 @@
 "use client"
 
 import * as React from "react"
+import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
 import RoleGate from "@/components/auth/RoleGate"
-import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Plus, Trash2, Power, Building2, Globe, Users } from "lucide-react"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { PageHeader } from "@/components/common/page-header"
+import { StatCard, StatCardSkeleton } from "@/components/common/stat-card"
+import { StatusBadge } from "@/components/common/status-badge"
+import {
+  Plus,
+  Trash2,
+  Power,
+  Building2,
+  Globe,
+  Users,
+  CircleOff,
+  Loader2,
+} from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 type Org = {
   id: string
@@ -41,6 +55,8 @@ export default function OrganizationsPage() {
   const [newName, setNewName] = React.useState("")
   const [newDomain, setNewDomain] = React.useState("")
   const [saving, setSaving] = React.useState(false)
+  // Org awaiting delete confirmation (replaces window.confirm)
+  const [deleteTarget, setDeleteTarget] = React.useState<Org | null>(null)
 
   const load = React.useCallback(async () => {
     const { data: orgData } = await supabase
@@ -122,199 +138,249 @@ export default function OrganizationsPage() {
     load()
   }
 
+  // Runs after the user confirms in the ConfirmDialog
   const deleteOrg = async (org: Org) => {
-    if (
-      !confirm(
-        `Delete "${org.name}" (${org.domain})? This will remove all access mappings for this organization.`
-      )
-    ) {
-      return
-    }
-
     await supabase.from("organizations").delete().eq("id", org.id)
     toast.success("Organization deleted")
     load()
   }
 
+  /* ── Derived stats ─────────────────── */
+  const activeCount = orgs.filter((o) => o.status === "active").length
+  const totalUsers = orgs.reduce((s, o) => s + (o.user_count ?? 0), 0)
+
+  const stats = [
+    { label: "Total Orgs", value: orgs.length, icon: Building2, tone: "indigo" as const },
+    { label: "Active", value: activeCount, icon: Globe, tone: "emerald" as const },
+    { label: "Inactive", value: orgs.length - activeCount, icon: CircleOff, tone: "rose" as const },
+    { label: "Total Users", value: totalUsers, icon: Users, tone: "violet" as const },
+  ]
+
+  /* ── Table columns ─────────────────── */
+  const columns: ColumnDef<Org>[] = [
+    {
+      accessorKey: "name",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
+      cell: ({ row }) => (
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+            <Building2 className="h-4 w-4" />
+          </span>
+          <span className="font-semibold text-gray-900 dark:text-white">{row.original.name}</span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "domain",
+      header: "Domain",
+      cell: ({ row }) => <StatusBadge tone="blue">@{row.original.domain}</StatusBadge>,
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => {
+        const active = row.original.status === "active"
+        return (
+          <StatusBadge tone={active ? "green" : "red"} dot className="capitalize">
+            {row.original.status}
+          </StatusBadge>
+        )
+      },
+    },
+    {
+      id: "users",
+      accessorFn: (o) => o.user_count ?? 0,
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Users" />,
+      cell: ({ row }) => (
+        <span className="font-medium tabular-nums text-gray-900 dark:text-white">
+          {row.original.user_count ?? 0}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "created_at",
+      header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
+      cell: ({ row }) => (
+        <span className="text-gray-500 dark:text-gray-400">
+          {new Date(row.original.created_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      enableSorting: false,
+      header: () => <span className="sr-only">Actions</span>,
+      meta: { className: "text-right", headerClassName: "text-right" },
+      cell: ({ row }) => {
+        const org = row.original
+        const active = org.status === "active"
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={active ? "Deactivate" : "Activate"}
+                  onClick={() => toggleStatus(org)}
+                  className={cn(
+                    active
+                      ? "text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10"
+                      : "text-emerald-500 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"
+                  )}
+                >
+                  <Power className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{active ? "Deactivate" : "Activate"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Delete organization"
+                  onClick={() => setDeleteTarget(org)}
+                  className="text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete organization</TooltipContent>
+            </Tooltip>
+          </div>
+        )
+      },
+    },
+  ]
+
   return (
     <RoleGate allowedRoles={["superadmin"]}>
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Organization Management</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Manage whitelisted domains and organizations
-            </p>
-          </div>
-
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Organization
-          </Button>
-        </div>
+        <PageHeader
+          title="Organization Management"
+          description="Manage whitelisted domains and organizations"
+          actions={
+            <Button variant="gradient" onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add Organization
+            </Button>
+          }
+        />
 
         {/* Summary cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-              <Building2 className="h-5 w-5 text-blue-600 dark:text-blue-300" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">{orgs.length}</p>
-              <p className="text-xs text-muted-foreground">Total Orgs</p>
-            </div>
-          </Card>
-
-          <Card className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-              <Globe className="h-5 w-5 text-green-600 dark:text-green-300" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {orgs.filter((o) => o.status === "active").length}
-              </p>
-              <p className="text-xs text-muted-foreground">Active</p>
-            </div>
-          </Card>
-
-          <Card className="p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-              <Users className="h-5 w-5 text-violet-600 dark:text-violet-300" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {orgs.reduce((s, o) => s + (o.user_count ?? 0), 0)}
-              </p>
-              <p className="text-xs text-muted-foreground">Total Users</p>
-            </div>
-          </Card>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {loading
+            ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+            : stats.map((s) => (
+                <StatCard key={s.label} label={s.label} value={s.value} icon={s.icon} tone={s.tone} />
+              ))}
         </div>
 
         {/* Table */}
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Organization</TableHead>
-                <TableHead>Domain</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Users</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
-                    Loading…
-                  </TableCell>
-                </TableRow>
-              ) : orgs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
-                    No organizations yet. Add one to get started.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                orgs.map((org) => (
-                  <TableRow key={org.id}>
-                    <TableCell className="font-semibold">{org.name}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-sm">
-                      {org.domain}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={org.status === "active" ? "default" : "secondary"}
-                        className={
-                          org.status === "active"
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                            : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-                        }
-                      >
-                        {org.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{org.user_count ?? 0}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {new Date(org.created_at).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={
-                            org.status === "active" ? "Deactivate" : "Activate"
-                          }
-                          onClick={() => toggleStatus(org)}
-                        >
-                          <Power
-                            className={`h-4 w-4 ${
-                              org.status === "active"
-                                ? "text-green-500"
-                                : "text-muted-foreground"
-                            }`}
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Delete organization"
-                          onClick={() => deleteOrg(org)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </Card>
+        <DataTable
+          columns={columns}
+          data={orgs}
+          loading={loading}
+          title="Organizations"
+          description="Only users whose email matches an active domain can register"
+          searchable
+          searchPlaceholder="Search by name or domain…"
+          entityName="organizations"
+          getRowId={(o) => o.id}
+          emptyIcon={Building2}
+          emptyTitle="No organizations yet"
+          emptyDescription="Add one to get started."
+          emptyAction={
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add Organization
+            </Button>
+          }
+        />
 
         {/* Add Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Add Organization</DialogTitle>
+              <DialogDescription>
+                Whitelist a new email domain for registration.
+              </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label>Organization Name</Label>
-                <Input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. CGB India"
-                />
-              </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                addOrg()
+              }}
+              className="flex flex-col gap-6"
+            >
+              <FieldGroup className="sm:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="org-name" required>
+                    Organization Name
+                  </FieldLabel>
+                  <Input
+                    id="org-name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. CGB India"
+                  />
+                </Field>
 
-              <div className="space-y-2">
-                <Label>Domain</Label>
-                <Input
-                  value={newDomain}
-                  onChange={(e) => setNewDomain(e.target.value)}
-                  placeholder="e.g. cgbindia.com"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Only users with emails from this domain can register
-                </p>
-              </div>
+                <Field>
+                  <FieldLabel htmlFor="org-domain" required>
+                    Domain
+                  </FieldLabel>
+                  <Input
+                    id="org-domain"
+                    value={newDomain}
+                    onChange={(e) => setNewDomain(e.target.value)}
+                    placeholder="e.g. cgbindia.com"
+                  />
+                  <FieldDescription>
+                    Only users with emails from this domain can register
+                  </FieldDescription>
+                </Field>
+              </FieldGroup>
 
-              <Button className="w-full" onClick={addOrg} disabled={saving}>
-                {saving ? "Adding…" : "Add Organization"}
-              </Button>
-            </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {saving ? "Adding…" : "Add Organization"}
+                </Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
+
+        {/* Delete confirmation */}
+        <ConfirmDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null)
+          }}
+          title="Delete organization?"
+          description={
+            deleteTarget
+              ? `Delete "${deleteTarget.name}" (${deleteTarget.domain})? This will remove all access mappings for this organization.`
+              : ""
+          }
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={() => {
+            if (deleteTarget) deleteOrg(deleteTarget)
+          }}
+        />
       </div>
     </RoleGate>
   )

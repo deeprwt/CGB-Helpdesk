@@ -5,14 +5,36 @@ import { supabase } from "@/lib/supabaseClient"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PageHeader, type PageHeaderMetaItem } from "@/components/common/page-header"
+import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
+import { getInitials, roleLabel } from "@/hooks/useCurrentUser"
+import { IdCard, Loader2, Pencil, UserCircle2 } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 /* ---------------- TYPES ---------------- */
@@ -41,6 +63,55 @@ type UserProfile = {
 type UserInfoCardProps = {
   profileId?: string
   currentRole?: Role | null
+}
+
+/* ---------------- UI HELPERS ---------------- */
+
+const ROLE_TONE: Record<Role, BadgeTone> = {
+  superadmin: "violet",
+  admin: "blue",
+  engineer: "emerald",
+  user: "gray",
+}
+
+/** Edit form layout: [field name, label, spans both columns?] */
+const WORK_FIELDS: [string, string][] = [
+  ["full_name", "Full Name"],
+  ["phone", "Phone Number"],
+  ["employee_id", "Employee ID"],
+  ["department", "Department"],
+  ["designation", "Designation"],
+  ["position", "Position"],
+  ["manager", "Manager"],
+]
+
+const ADDRESS_FIELDS: [string, string, boolean?][] = [
+  ["present_address", "Present Address", true],
+  ["permanent_address", "Permanent Address", true],
+  ["city", "City"],
+  ["postal_code", "Postal Code"],
+  ["country", "Country"],
+]
+
+function InfoItem({
+  label,
+  value,
+  className,
+}: {
+  label: string
+  value?: string | null
+  className?: string
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-1 break-words text-sm font-medium text-gray-900 dark:text-white">
+        {value || "—"}
+      </dd>
+    </div>
+  )
 }
 
 /* ---------------- COMPONENT ---------------- */
@@ -162,88 +233,163 @@ export default function UserInfoCard({
     setOpen(false)
   }
 
-  if (!profile) return null
+  /* ---------------- LOADING ---------------- */
+
+  if (!profile) {
+    return (
+      <>
+        <div className="order-first rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/70 p-5 sm:p-6 lg:col-span-2 dark:border-indigo-500/20 dark:from-indigo-500/10 dark:via-gray-900 dark:to-purple-500/10">
+          <Skeleton className="h-5 w-24 rounded-full" />
+          <div className="mt-3 flex items-center gap-4">
+            <Skeleton className="size-16 rounded-full" />
+            <div className="space-y-2">
+              <Skeleton className="h-6 w-48" />
+              <Skeleton className="h-4 w-32" />
+            </div>
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-40" />
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-full max-w-[180px]" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </>
+    )
+  }
 
   /* ---------------- UI ---------------- */
 
+  const isOwnProfile = profile.id === currentUserId
+  const location = [profile.city, profile.country].filter(Boolean).join(", ")
+  const subtitle = [profile.designation, profile.department].filter(Boolean).join(" · ")
+
+  const meta: PageHeaderMetaItem[] = [{ label: profile.email, dot: "bg-emerald-400" }]
+  if (location) meta.push({ label: location, dot: "bg-indigo-400" })
+  if (profile.phone) meta.push({ label: profile.phone, dot: "bg-purple-400" })
+
+  const fieldValue = (name: string) =>
+    (profile as Record<string, string | null>)[name] ?? ""
+
   return (
-    <div className="rounded-2xl border p-6">
-      <div className="flex justify-between items-start gap-6">
-        <div className="flex gap-4">
-          <Avatar className="h-16 w-16">
-            <AvatarImage src={profile.avatar_url ?? ""} />
-            <AvatarFallback>
-              {profile.full_name?.charAt(0)}
-            </AvatarFallback>
-          </Avatar>
+    <>
+      {/* HERO */}
+      <PageHeader
+        variant="hero"
+        className="order-first lg:col-span-2 sm:[&_h1~*]:pl-20"
+        eyebrow={isOwnProfile ? "My profile" : "User profile"}
+        eyebrowIcon={UserCircle2}
+        title={
+          <span className="flex items-center gap-4">
+            <Avatar className="size-16 shadow-md ring-4 ring-white dark:ring-gray-900">
+              <AvatarImage src={profile.avatar_url ?? ""} className="object-cover" />
+              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-lg font-semibold text-white">
+                {getInitials(profile.full_name)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="break-words">{profile.full_name || profile.email}</span>
+              {profile.role && (
+                <StatusBadge tone={ROLE_TONE[profile.role] ?? "gray"} dot className="text-xs">
+                  {roleLabel(profile.role)}
+                </StatusBadge>
+              )}
+            </span>
+          </span>
+        }
+        description={subtitle || undefined}
+        meta={meta}
+      />
 
-          <div>
-            <h3 className="text-lg font-semibold">
-              {profile.full_name}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {profile.email}
-            </p>
-            <p className="text-sm">
-              {profile.designation ?? "-"}
-            </p>
-          </div>
-        </div>
+      {/* PERSONAL INFORMATION */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2.5 text-base text-gray-900 dark:text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+              <IdCard className="h-4 w-4" />
+            </span>
+            Personal Information
+          </CardTitle>
+          <CardDescription className="text-gray-500 dark:text-gray-400">
+            Contact and work details
+          </CardDescription>
+          {canEdit && (
+            <CardAction>
+              <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+                <Pencil className="h-4 w-4" />
+                Edit
+              </Button>
+            </CardAction>
+          )}
+        </CardHeader>
 
-        {canEdit && (
-          <Button variant="outline" onClick={() => setOpen(true)}>
-            Edit
-          </Button>
-        )}
-      </div>
+        <CardContent>
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
+            <InfoItem label="Full Name" value={profile.full_name} />
+            <InfoItem label="Email" value={profile.email} />
+            <InfoItem label="Phone" value={profile.phone} />
+            <InfoItem label="Employee ID" value={profile.employee_id} />
+            <InfoItem label="Department" value={profile.department} />
+            <InfoItem label="Designation" value={profile.designation} />
+            <InfoItem label="Position" value={profile.position} />
+            <InfoItem label="Manager" value={profile.manager} />
+          </dl>
+        </CardContent>
+      </Card>
 
       {/* EDIT MODAL */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Profile</DialogTitle>
+            <DialogDescription>
+              Update personal, work and address details.
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              ["full_name", "Full Name"],
-              ["employee_id", "Employee ID"],
-              ["department", "Department"],
-              ["designation", "Designation"],
-              ["position", "Position"],
-              ["manager", "Manager"],
-              ["phone", "Phone Number"],
-              ["city", "City"],
-              ["postal_code", "Postal Code"],
-              ["country", "Country"],
-            ].map(([name, label]) => (
-              <div key={name}>
-                <Label>{label}</Label>
-                <Input
-                  name={name}
-                  value={(profile as Record<string, string | null>)[name] ?? ""}
-                  onChange={handleChange}
-                />
-              </div>
-            ))}
+          <div className="flex flex-col gap-6">
+            <FieldSet>
+              <FieldLegend>Personal &amp; work</FieldLegend>
+              <FieldGroup className="sm:grid-cols-2">
+                {WORK_FIELDS.map(([name, label]) => (
+                  <Field key={name}>
+                    <FieldLabel htmlFor={`profile-${name}`}>{label}</FieldLabel>
+                    <Input
+                      id={`profile-${name}`}
+                      name={name}
+                      value={fieldValue(name)}
+                      onChange={handleChange}
+                    />
+                  </Field>
+                ))}
+              </FieldGroup>
+            </FieldSet>
 
-            <div className="col-span-2">
-              <Label>Present Address</Label>
-              <Input
-                name="present_address"
-                value={profile.present_address ?? ""}
-                onChange={handleChange}
-              />
-            </div>
+            <Separator />
 
-            <div className="col-span-2">
-              <Label>Permanent Address</Label>
-              <Input
-                name="permanent_address"
-                value={profile.permanent_address ?? ""}
-                onChange={handleChange}
-              />
-            </div>
+            <FieldSet>
+              <FieldLegend>Address</FieldLegend>
+              <FieldGroup className="sm:grid-cols-2">
+                {ADDRESS_FIELDS.map(([name, label, wide]) => (
+                  <Field key={name} className={cn(wide && "sm:col-span-2")}>
+                    <FieldLabel htmlFor={`profile-${name}`}>{label}</FieldLabel>
+                    <Input
+                      id={`profile-${name}`}
+                      name={name}
+                      value={fieldValue(name)}
+                      onChange={handleChange}
+                    />
+                  </Field>
+                ))}
+              </FieldGroup>
+            </FieldSet>
           </div>
 
           <DialogFooter>
@@ -251,11 +397,12 @@ export default function UserInfoCard({
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={loading}>
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               {loading ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

@@ -3,13 +3,20 @@
 import * as React from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
-import { ChevronLeft, Eye, EyeOff } from "lucide-react"
+import { ChevronLeft, Eye, EyeOff, Loader2, Lock, Mail, User, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+
+const inputClass =
+  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-indigo-400 focus-visible:ring-indigo-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+
+const leadingIconClass =
+  "pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500"
 
 export default function SignUpForm() {
   const [showPassword, setShowPassword] = React.useState(false)
@@ -65,124 +72,187 @@ export default function SignUpForm() {
   }
 
   return (
-    <div className="flex flex-col flex-1 lg:w-1/2 w-full overflow-y-auto no-scrollbar">
-      <div className="w-full max-w-md sm:pt-10 mx-auto mb-5">
-        <Link
-          href="/"
-          className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+    <div className="flex w-full flex-1 flex-col overflow-y-auto no-scrollbar lg:w-1/2">
+      <div className="mx-auto mb-5 w-full max-w-md sm:pt-10">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="-ml-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back to dashboard
-        </Link>
+          <Link href="/">
+            <ChevronLeft />
+            Back to dashboard
+          </Link>
+        </Button>
       </div>
 
-      <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
-        <div className="mb-5 sm:mb-8">
-          <h1 className="mb-2 font-semibold text-gray-800 dark:text-white text-xl">
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center pb-10">
+        <div className="mb-8">
+          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-500/25">
+            <UserPlus className="h-5 w-5" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
             Sign Up
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Enter your email and password to sign up!
           </p>
         </div>
 
         {/* <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
-          <Button variant="secondary" className="py-3" onClick={signUpWithGoogle}>
+          <Button type="button" variant="outline" className="h-12" onClick={signUpWithGoogle}>
             Sign up with Google
           </Button>
-          <Button variant="secondary" className="py-3">
+          <Button type="button" variant="outline" className="h-12">
             Sign up with X
           </Button>
         </div>
 
         <div className="relative py-3 sm:py-5">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200 dark:border-gray-800" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="p-2 text-gray-400 bg-white dark:bg-gray-900 sm:px-5 sm:py-2">
-              Or
-            </span>
-          </div>
+          <Separator />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-sm text-gray-400 dark:bg-gray-900">
+            Or
+          </span>
         </div> */}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <div>
-              <Label>First Name *</Label>
-              <Input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Enter your first name"
-                required
-              />
-            </div>
-            <div>
-              <Label>Last Name *</Label>
-              <Input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Enter your last name"
-                required
-              />
-            </div>
-          </div>
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <FieldGroup className="sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="signup-first-name" required>
+                  First Name
+                </FieldLabel>
+                <div className="relative">
+                  <User className={leadingIconClass} />
+                  <Input
+                    id="signup-first-name"
+                    autoComplete="given-name"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="Enter your first name"
+                    className={inputClass}
+                    required
+                  />
+                </div>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="signup-last-name" required>
+                  Last Name
+                </FieldLabel>
+                <div className="relative">
+                  <User className={leadingIconClass} />
+                  <Input
+                    id="signup-last-name"
+                    autoComplete="family-name"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Enter your last name"
+                    className={inputClass}
+                    required
+                  />
+                </div>
+              </Field>
+            </FieldGroup>
 
-          <div>
-            <Label>Email *</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email"
-              required
-            />
-          </div>
+            <Field>
+              <FieldLabel htmlFor="signup-email" required>
+                Email
+              </FieldLabel>
+              <div className="relative">
+                <Mail className={leadingIconClass} />
+                <Input
+                  id="signup-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  className={inputClass}
+                  required
+                />
+              </div>
+            </Field>
 
-          <div>
-            <Label>Password *</Label>
-            <div className="relative">
-              <Input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                required
+            <Field>
+              <FieldLabel htmlFor="signup-password" required>
+                Password
+              </FieldLabel>
+              <div className="relative">
+                <Lock className={leadingIconClass} />
+                <Input
+                  id="signup-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className={`${inputClass} pr-12`}
+                  required
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-white/5 dark:hover:text-gray-300"
+                >
+                  {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+                </Button>
+              </div>
+            </Field>
+
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="signup-agree"
+                checked={agree}
+                onCheckedChange={(v) => setAgree(Boolean(v))}
+                className="mt-0.5"
               />
-              <span
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer"
+              <Label
+                htmlFor="signup-agree"
+                className="mb-0 block cursor-pointer font-normal leading-relaxed text-gray-500 dark:text-gray-400"
               >
-                {showPassword ? <Eye /> : <EyeOff />}
-              </span>
+                By creating an account you agree to our{" "}
+                <span className="font-medium text-gray-800 dark:text-white">
+                  Terms & Conditions
+                </span>{" "}
+                and{" "}
+                <span className="font-medium text-gray-800 dark:text-white">
+                  Privacy Policy
+                </span>
+              </Label>
             </div>
-          </div>
 
-          <div className="flex items-start gap-3">
-            <Checkbox checked={agree} onCheckedChange={(v) => setAgree(Boolean(v))} />
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              By creating an account you agree to our{" "}
-              <span className="font-medium text-gray-800 dark:text-white">
-                Terms & Conditions
-              </span>{" "}
-              and{" "}
-              <span className="font-medium text-gray-800 dark:text-white">
-                Privacy Policy
-              </span>
-            </p>
-          </div>
-
-          <Button className="w-full" disabled={loading}>
-            {loading ? "Creating account..." : "Sign Up"}
-          </Button>
+            <Button
+              type="submit"
+              variant="gradient"
+              className="h-12 w-full font-semibold"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" />
+                  Creating account...
+                </>
+              ) : (
+                "Sign Up"
+              )}
+            </Button>
+          </FieldGroup>
         </form>
 
-        <div className="mt-5 text-sm text-center text-gray-700 dark:text-gray-400">
+        <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
           Already have an account?{" "}
-          <Link href="/signin" className="text-brand-500 hover:text-brand-600">
-            Sign In
-          </Link>
-        </div>
+          <Button
+            asChild
+            variant="link"
+            className="h-auto p-0 font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+            <Link href="/signin">Sign In</Link>
+          </Button>
+        </p>
       </div>
     </div>
   )

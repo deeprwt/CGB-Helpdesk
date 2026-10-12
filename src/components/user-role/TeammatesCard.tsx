@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Card,
+  CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -19,7 +21,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreVertical } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/common/status-badge";
+import { EmptyState } from "@/components/common/empty-state";
+import { ArrowRight, MoreVertical, UserRound, UsersRound } from "lucide-react";
+import { getInitials } from "@/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabaseClient";
 import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org";
 
@@ -147,70 +153,106 @@ export default function TeammatesCard() {
     role === "admin" ? "Online Engineers" : "Teammates";
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base font-semibold">
+    <Card className="h-full gap-4">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
           {title}
+          <StatusBadge tone="emerald" dot className="text-[11px]">
+            Live
+          </StatusBadge>
         </CardTitle>
+        <CardDescription className="text-gray-500 dark:text-gray-400">
+          Engineers active in the last 2 minutes
+        </CardDescription>
 
         {role === "admin" && (
-          <Link
-            href="/engineers"
-            className="text-sm text-primary hover:underline"
-          >
-            View All
-          </Link>
+          <CardAction>
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+            >
+              <Link href="/engineers">
+                View All
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </CardAction>
         )}
       </CardHeader>
 
-      <CardContent className="space-y-4">
-        {engineers.map((engineer) => (
-          <div
-            key={engineer.id}
-            className="flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage
-                    src={engineer.avatar_url ?? undefined}
-                  />
-                  <AvatarFallback>
-                    {engineer.full_name.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+      <CardContent className="flex-1">
+        {engineers.length === 0 ? (
+          <EmptyState
+            icon={UsersRound}
+            title="Nobody online"
+            description="No engineers are online right now."
+            className="py-8"
+          />
+        ) : (
+          <ul className="-mx-2 flex flex-col gap-1">
+            {engineers.map((engineer) => (
+              <li
+                key={engineer.id}
+                className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-gray-50 dark:hover:bg-white/[0.03]"
+              >
+                <div className="relative shrink-0">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage
+                      src={engineer.avatar_url ?? undefined}
+                      alt={engineer.full_name}
+                    />
+                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                      {getInitials(engineer.full_name)}
+                    </AvatarFallback>
+                  </Avatar>
 
-                {/* 🟢 WhatsApp-style online dot */}
-                <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background" />
-              </div>
+                  {/* 🟢 WhatsApp-style online dot */}
+                  <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-gray-900" />
+                </div>
 
-              <p className="text-sm font-medium">
-                {engineer.full_name}
-              </p>
-            </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                    {engineer.full_name}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    </span>
+                    Online
+                  </p>
+                </div>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded hover:bg-muted">
-                  <MoreVertical className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
+                <StatusBadge tone="sky" className="hidden sm:inline-flex">
+                  Engineer
+                </StatusBadge>
 
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link href={`/profile/${engineer.id}`}>
-                    View Details
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ))}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Actions for ${engineer.full_name}`}
+                      className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    >
+                      <MoreVertical />
+                    </Button>
+                  </DropdownMenuTrigger>
 
-        {engineers.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No engineers are online right now.
-          </p>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem asChild>
+                      <Link href={`/profile/${engineer.id}`}>
+                        <UserRound />
+                        View Details
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </li>
+            ))}
+          </ul>
         )}
       </CardContent>
     </Card>

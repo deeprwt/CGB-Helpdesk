@@ -1,25 +1,21 @@
 "use client"
 
 import * as React from "react"
+import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
+import { DataTable } from "@/components/ui/data-table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { StatusBadge } from "@/components/common/status-badge"
 import TicketFilters from "@/components/tickets/TicketFilters"
-import { Eye } from "lucide-react"
+import { Eye, Inbox, ListTodo, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
-import { timeAgo, STATUS_STYLE } from "@/lib/ticket-utils"
+import { timeAgo, STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
+import { getInitials } from "@/hooks/useCurrentUser"
 import { sendNotification, sendEmailNotification } from "@/lib/notify"
 import { logActivity } from "@/lib/activity"
 
@@ -50,6 +46,7 @@ export default function EngineerTicketTable() {
 
   const [page, setPage] = React.useState(1)
   const [hasNext, setHasNext] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
 
   const loadTickets = async () => {
     const {
@@ -106,7 +103,11 @@ export default function EngineerTicketTable() {
   }
 
   React.useEffect(() => {
-    loadTickets()
+    let active = true
+    setLoading(true)
+    loadTickets().finally(() => {
+      if (active) setLoading(false)
+    })
 
     const channel = supabase
       .channel("engineer-tickets")
@@ -118,6 +119,7 @@ export default function EngineerTicketTable() {
       .subscribe()
 
     return () => {
+      active = false
       supabase.removeChannel(channel)
     }
   }, [tab, search, status, category, page])
@@ -194,110 +196,174 @@ export default function EngineerTicketTable() {
     }
   }
 
-  return (
-    <Card className="p-6 space-y-6">
-      {/* Header + Filters */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Engineer Tickets</h2>
+  const columns: ColumnDef<Ticket>[] = [
+    {
+      accessorKey: "id",
+      header: "Ticket ID",
+      cell: ({ row }) => (
+        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10">
+          {row.original.id.slice(0, 8).toUpperCase()}
+        </span>
+      ),
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "subject",
+      header: "Subject",
+      cell: ({ row }) => (
+        <span
+          title={row.original.subject}
+          className="block max-w-[280px] truncate font-medium text-gray-900 dark:text-white"
+        >
+          {row.original.subject}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "location",
+      header: "Location",
+      cell: ({ row }) => (
+        <span className="text-gray-500 dark:text-gray-400">{row.original.location ?? "-"}</span>
+      ),
+    },
+    {
+      accessorKey: "requester_name",
+      header: "Requester",
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2.5">
+          <Avatar className="size-7">
+            <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[11px] font-semibold text-white">
+              {getInitials(row.original.requester_name)}
+            </AvatarFallback>
+          </Avatar>
+          <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
+            {row.original.requester_name}
+          </span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "created_at",
+      header: "Created",
+      cell: ({ row }) => (
+        <span className="text-gray-500 dark:text-gray-400">{timeAgo(row.original.created_at)}</span>
+      ),
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }) => (
+        <StatusBadge tone={STATUS_TONE[row.original.status] ?? "gray"} dot>
+          {statusLabel(row.original.status)}
+        </StatusBadge>
+      ),
+    },
+    {
+      accessorKey: "category",
+      header: "Category",
+      cell: ({ row }) => (
+        <span className="text-gray-600 dark:text-gray-300">{row.original.category ?? "-"}</span>
+      ),
+    },
+    {
+      accessorKey: "sub_category",
+      header: "Sub-Category",
+      cell: ({ row }) => (
+        <span className="text-gray-600 dark:text-gray-300">{row.original.sub_category ?? "-"}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: tab === "queue" ? "Assign" : "Actions",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const t = row.original
+        return tab === "queue" ? (
+          <Button size="sm" onClick={() => acquireTicket(t.id, t.requester_id)}>
+            <UserCheck />
+            Acquire
+          </Button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="View ticket"
+                className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                onClick={() => router.push(`/ticket/${t.id}`)}
+              >
+                <Eye />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>View ticket</TooltipContent>
+          </Tooltip>
+        )
+      },
+      meta: { className: "text-right", headerClassName: "text-right" },
+    },
+  ]
 
+  return (
+    <DataTable
+      columns={columns}
+      data={tickets}
+      loading={loading}
+      getRowId={(t) => t.id}
+      title="Engineer Tickets"
+      description={
+        tab === "queue"
+          ? "Unassigned tickets from your organisation, newest first."
+          : "Tickets currently assigned to you."
+      }
+      searchable
+      searchPlaceholder="Search by subject…"
+      search={search}
+      onSearchChange={setSearch}
+      filters={
         <TicketFilters
-          search={search}
-          setSearch={setSearch}
           status={status}
           setStatus={setStatus}
           category={category}
           setCategory={setCategory}
         />
-      </div>
-
-      {/* Tabs */}
-      <Tabs
-        value={tab}
-        onValueChange={(v) => {
-          setTab(v as "queue" | "mytask")
-          setPage(1)
-        }}
-      >
-        <TabsList>
-          <TabsTrigger value="queue">Queue</TabsTrigger>
-          <TabsTrigger value="mytask">My Tasks</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {/* Table */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Ticket ID</TableHead>
-            <TableHead>Subject</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead>Requester</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead>Sub-Category</TableHead>
-            <TableHead className="text-right">
-              {tab === "queue" ? "Assign" : "Actions"}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-
-        <TableBody>
-          {tickets.map((t) => (
-            <TableRow key={t.id}>
-              <TableCell>{t.id.slice(0, 8).toUpperCase()}</TableCell>
-              <TableCell>{t.subject}</TableCell>
-              <TableCell>{t.location ?? "-"}</TableCell>
-              <TableCell>{t.requester_name}</TableCell>
-              <TableCell>{timeAgo(t.created_at)}</TableCell>
-
-              <TableCell>
-                <Badge className={STATUS_STYLE[t.status]}>
-                  {t.status.replace("_", " ").toUpperCase()}
-                </Badge>
-              </TableCell>
-
-              <TableCell>{t.category ?? "-"}</TableCell>
-              <TableCell>{t.sub_category ?? "-"}</TableCell>
-
-              <TableCell className="text-right">
-                {tab === "queue" ? (
-                  <Button size="sm" onClick={() => acquireTicket(t.id, t.requester_id)}>
-                    Acquire
-                  </Button>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => router.push(`/ticket/${t.id}`)}
-                  >
-                    <Eye className="h-5 w-5" />
-                  </Button>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-
-      {/* Pagination */}
-      <div className="flex justify-end gap-2">
-        <Button
-          variant="outline"
-          disabled={page === 1}
-          onClick={() => setPage((p) => p - 1)}
+      }
+      subHeader={
+        <Tabs
+          value={tab}
+          onValueChange={(v) => {
+            setTab(v as "queue" | "mytask")
+            setPage(1)
+          }}
         >
-          Previous
-        </Button>
-
-        <Button
-          variant="outline"
-          disabled={!hasNext}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </Button>
-      </div>
-    </Card>
+          <TabsList>
+            <TabsTrigger value="queue">
+              <Inbox />
+              Queue
+            </TabsTrigger>
+            <TabsTrigger value="mytask">
+              <ListTodo />
+              My Tasks
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      }
+      pagination={{
+        pageIndex: page - 1,
+        pageSize: PAGE_SIZE,
+        hasNextPage: hasNext,
+        onPageChange: (i) => setPage(i + 1),
+      }}
+      entityName="tickets"
+      emptyIcon={tab === "queue" ? Inbox : ListTodo}
+      emptyTitle={tab === "queue" ? "Queue is clear" : "No tasks assigned"}
+      emptyDescription={
+        tab === "queue"
+          ? "There are no unassigned tickets matching your filters."
+          : "Tickets you acquire will show up here."
+      }
+      onRowClick={tab === "mytask" ? (t) => router.push(`/ticket/${t.id}`) : undefined}
+    />
   )
 }

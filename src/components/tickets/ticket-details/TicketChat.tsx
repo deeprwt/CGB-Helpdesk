@@ -4,7 +4,38 @@ import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
-import { Send, Paperclip, ChevronDown, ChevronUp, CheckCheck } from "lucide-react"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Textarea } from "@/components/ui/textarea"
+import { Separator } from "@/components/ui/separator"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
+import { EmptyState } from "@/components/common/empty-state"
+import {
+  Send,
+  Paperclip,
+  ChevronDown,
+  History,
+  MessageSquare,
+  Users,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ActivityItem } from "./TicketActivityTrail"
 import { sendNotification, sendEmailNotification } from "@/lib/notify"
@@ -64,12 +95,12 @@ function formatDateLabel(dateStr: string) {
   })
 }
 
-const ACTIVITY_PILL: Record<string, string> = {
-  done: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  closed: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  processing: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  hold: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  pending: "bg-muted text-muted-foreground",
+const ACTIVITY_TONE: Record<string, BadgeTone> = {
+  done: "green",
+  closed: "emerald",
+  processing: "blue",
+  hold: "orange",
+  pending: "gray",
 }
 
 /* -----------------------------------
@@ -212,212 +243,231 @@ export default function TicketChat({
   )
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <Card className="h-[640px] gap-0 overflow-hidden py-0 xl:h-[760px]">
 
       {/* ── Header ─────────────────────── */}
-      <div className="flex items-center gap-3 pb-3 border-b border-border/60">
-        <div className="relative flex-shrink-0">
-          <Avatar className="h-9 w-9">
-            <AvatarImage src={otherUser.avatar_url ?? undefined} />
-            <AvatarFallback className="bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-bold text-sm">
-              {otherUser.name[0]?.toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <span
-            className={cn(
-              "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
-              isOtherOnline ? "bg-green-500" : "bg-muted-foreground/40"
-            )}
-          />
+      <CardHeader className="border-b border-gray-100 py-4 dark:border-white/10 [.border-b]:pb-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="relative shrink-0">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={otherUser.avatar_url ?? undefined} />
+              <AvatarFallback className="bg-gradient-to-br from-sky-500 to-indigo-500 text-sm font-semibold text-white">
+                {otherUser.name[0]?.toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span
+              className={cn(
+                "absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-gray-900",
+                isOtherOnline ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"
+              )}
+            />
+          </div>
+          <div className="min-w-0">
+            <CardTitle className="truncate text-base font-semibold text-gray-900 dark:text-white">
+              Conversation
+            </CardTitle>
+            <CardDescription className="mt-1 flex items-center gap-1.5 truncate text-xs text-gray-500 dark:text-gray-400">
+              <span className="truncate">{otherUser.name}</span>
+              <span aria-hidden>·</span>
+              <span
+                className={cn(
+                  "font-medium",
+                  isOtherOnline ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500 dark:text-gray-400"
+                )}
+              >
+                {isOtherOnline ? "Online" : "Offline"}
+              </span>
+            </CardDescription>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold leading-none">{otherUser.name}</p>
-          <p className={cn(
-            "text-xs mt-0.5",
-            isOtherOnline ? "text-green-500" : "text-muted-foreground"
-          )}>
-            {isOtherOnline ? "Online" : "Offline"}
-          </p>
-        </div>
-      </div>
+        <CardAction className="flex items-center gap-2 self-center">
+          <StatusBadge tone={onlineUsers.length > 1 ? "emerald" : "gray"} className="hidden sm:inline-flex">
+            <Users className="h-3 w-3" />
+            {onlineUsers.length} online
+          </StatusBadge>
+          <StatusBadge tone="indigo">
+            <MessageSquare className="h-3 w-3" />
+            {messages.length}
+          </StatusBadge>
+        </CardAction>
+      </CardHeader>
 
       {/* ── Activity Log (collapsible) ── */}
       {visibleActivity.length > 0 && (
-        <div className="mt-3 mb-1">
-          <button
-            onClick={() => setShowActivity(!showActivity)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-muted/50 hover:bg-muted/70 transition-colors border border-border/40"
-          >
-            <span className="text-xs font-semibold text-muted-foreground">
-              Activity Log · {visibleActivity.length} events
-            </span>
-            {showActivity
-              ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-              : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-          </button>
+        <Collapsible
+          open={showActivity}
+          onOpenChange={setShowActivity}
+          className="border-b border-gray-100 px-6 py-2 dark:border-white/10"
+        >
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between px-2 text-xs font-semibold text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-white/5"
+            >
+              <span className="flex items-center gap-2">
+                <History className="h-3.5 w-3.5" />
+                Activity Log · {visibleActivity.length} events
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  showActivity && "rotate-180"
+                )}
+              />
+            </Button>
+          </CollapsibleTrigger>
 
-          {showActivity && (
-            <div className="mt-1.5 rounded-xl border border-border/50 bg-muted/20 divide-y divide-border/30 overflow-hidden">
+          <CollapsibleContent>
+            <div className="mt-1 mb-1 max-h-48 divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50/60 dark:divide-white/5 dark:border-white/10 dark:bg-white/[0.03]">
               {visibleActivity.map((item, i) => (
-                <div key={i} className="flex items-center gap-2.5 px-3 py-2.5">
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide flex-shrink-0",
-                      ACTIVITY_PILL[item.status] ?? ACTIVITY_PILL.pending
-                    )}
+                <div key={i} className="flex items-center gap-2.5 px-3 py-2">
+                  <StatusBadge
+                    tone={ACTIVITY_TONE[item.status] ?? "gray"}
+                    className="shrink-0 text-[10px] font-semibold uppercase tracking-wide"
                   >
                     {item.status === "processing" ? "active" : item.status}
-                  </span>
-                  <span className="text-xs font-medium text-foreground/90 truncate">
+                  </StatusBadge>
+                  <span className="truncate text-xs font-medium text-gray-700 dark:text-gray-300">
                     {item.label}
                   </span>
                   {item.date && (
-                    <span className="ml-auto text-[10px] text-muted-foreground flex-shrink-0">
+                    <span className="ml-auto shrink-0 text-[10px] text-gray-400">
                       {item.date}
                     </span>
                   )}
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
       {/* ── Messages ───────────────────── */}
-      <div className="flex-1 overflow-y-auto min-h-0 mt-3 pr-1 space-y-1">
+      <CardContent className="relative min-h-0 flex-1 px-0">
+        <ScrollArea className="absolute inset-0">
+          <div className="px-6 py-4">
 
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 py-10">
-            <div className="h-12 w-12 rounded-full bg-muted/60 flex items-center justify-center">
-              <CheckCheck className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground text-center">
-              No messages yet.
-              <br />
-              <span className="text-xs">Start the conversation below.</span>
-            </p>
-          </div>
-        )}
+            {messages.length === 0 && (
+              <EmptyState
+                icon={MessageSquare}
+                title="No messages yet."
+                description="Start the conversation below."
+                className="py-16"
+              />
+            )}
 
-        {messagesByDate.map(({ date, messages: dayMessages }) => (
-          <div key={date}>
+            {messagesByDate.map(({ date, messages: dayMessages }) => (
+              <div key={date}>
 
-            {/* Date divider */}
-            <div className="flex items-center gap-2 my-4">
-              <div className="flex-1 h-px bg-border/50" />
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2 flex-shrink-0">
-                {date}
-              </span>
-              <div className="flex-1 h-px bg-border/50" />
-            </div>
+                {/* Date divider */}
+                <div className="my-4 flex items-center gap-3">
+                  <Separator className="flex-1 bg-gray-100 dark:bg-white/10" />
+                  <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:bg-white/5 dark:text-gray-400">
+                    {date}
+                  </span>
+                  <Separator className="flex-1 bg-gray-100 dark:bg-white/10" />
+                </div>
 
-            {dayMessages.map((msg, idx) => {
-              const isMine = msg.sender_id === currentUser.id
-              const profile = isMine ? currentUser : otherUser
-              const prevMsg = dayMessages[idx - 1]
-              const nextMsg = dayMessages[idx + 1]
-              const isFirstInGroup =
-                !prevMsg || prevMsg.sender_id !== msg.sender_id
-              const isLastInGroup =
-                !nextMsg || nextMsg.sender_id !== msg.sender_id
+                {dayMessages.map((msg, idx) => {
+                  const isMine = msg.sender_id === currentUser.id
+                  const profile = isMine ? currentUser : otherUser
+                  const prevMsg = dayMessages[idx - 1]
+                  const nextMsg = dayMessages[idx + 1]
+                  const isFirstInGroup =
+                    !prevMsg || prevMsg.sender_id !== msg.sender_id
+                  const isLastInGroup =
+                    !nextMsg || nextMsg.sender_id !== msg.sender_id
 
-              return (
-                <div
-                  key={msg.id}
-                  className={cn(
-                    "flex items-end gap-2",
-                    isMine ? "flex-row-reverse" : "flex-row",
-                    isFirstInGroup ? "mt-4" : "mt-0.5"
-                  )}
-                >
-                  {/* Avatar — only shown on last bubble in group */}
-                  <div className="h-7 w-7 flex-shrink-0">
-                    {isLastInGroup ? (
-                      <Avatar className="h-7 w-7">
-                        <AvatarImage src={profile.avatar_url ?? undefined} />
-                        <AvatarFallback
-                          className={cn(
-                            "text-xs font-bold",
-                            isMine
-                              ? "bg-blue-600 text-white"
-                              : "bg-muted-foreground/20 text-foreground"
-                          )}
-                        >
-                          {profile.name[0]?.toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    ) : null}
-                  </div>
-
-                  {/* Bubble + metadata */}
-                  <div
-                    className={cn(
-                      "flex flex-col max-w-[72%]",
-                      isMine ? "items-end" : "items-start"
-                    )}
-                  >
-                    {isFirstInGroup && (
-                      <span className="text-[11px] font-semibold text-muted-foreground mb-1 px-1">
-                        {profile.name}
-                      </span>
-                    )}
-
+                  return (
                     <div
+                      key={msg.id}
                       className={cn(
-                        "px-3.5 py-2 text-sm leading-relaxed shadow-sm break-words",
-                        isMine
-                          ? [
-                              "bg-blue-600 text-white",
-                              isFirstInGroup && isLastInGroup
-                                ? "rounded-2xl"
-                                : isFirstInGroup
-                                ? "rounded-2xl rounded-br-sm"
-                                : isLastInGroup
-                                ? "rounded-2xl rounded-tr-sm"
-                                : "rounded-xl rounded-r-sm",
-                            ]
-                          : [
-                              "bg-muted text-foreground",
-                              isFirstInGroup && isLastInGroup
-                                ? "rounded-2xl"
-                                : isFirstInGroup
-                                ? "rounded-2xl rounded-bl-sm"
-                                : isLastInGroup
-                                ? "rounded-2xl rounded-tl-sm"
-                                : "rounded-xl rounded-l-sm",
-                            ]
+                        "flex items-end gap-2.5",
+                        isMine ? "flex-row-reverse" : "flex-row",
+                        isFirstInGroup ? "mt-4" : "mt-1"
                       )}
                     >
-                      {msg.message}
+                      {/* Avatar — only shown on last bubble in group */}
+                      <div className="h-8 w-8 shrink-0">
+                        {isLastInGroup ? (
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={profile.avatar_url ?? undefined} />
+                            <AvatarFallback
+                              className={cn(
+                                "bg-gradient-to-br text-xs font-semibold text-white",
+                                isMine
+                                  ? "from-indigo-500 to-purple-500"
+                                  : "from-sky-500 to-indigo-500"
+                              )}
+                            >
+                              {profile.name[0]?.toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        ) : null}
+                      </div>
+
+                      {/* Bubble + metadata */}
+                      <div
+                        className={cn(
+                          "flex max-w-[78%] flex-col sm:max-w-[70%]",
+                          isMine ? "items-end" : "items-start"
+                        )}
+                      >
+                        {isFirstInGroup && (
+                          <span className="mb-1 px-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                            {profile.name}
+                          </span>
+                        )}
+
+                        <div
+                          className={cn(
+                            "whitespace-pre-wrap break-words px-4 py-2.5 text-sm leading-relaxed shadow-sm",
+                            isMine
+                              ? "rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-500 to-purple-500 text-white"
+                              : "rounded-2xl rounded-bl-md bg-gray-100 text-gray-800 dark:bg-white/5 dark:text-gray-100"
+                          )}
+                        >
+                          {msg.message}
+                        </div>
+
+                        {isLastInGroup && (
+                          <span className="mt-1 px-1 text-[10px] text-gray-400 dark:text-gray-500">
+                            {formatTime(msg.created_at)}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                  )
+                })}
+              </div>
+            ))}
 
-                    {isLastInGroup && (
-                      <span className="text-[10px] text-muted-foreground mt-1 px-1">
-                        {formatTime(msg.created_at)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+            <div ref={bottomRef} />
           </div>
-        ))}
-
-        <div ref={bottomRef} />
-      </div>
+        </ScrollArea>
+      </CardContent>
 
       {/* ── Input ──────────────────────── */}
-      <div className="mt-3 pt-3 border-t border-border/60">
-        <div className="flex items-end gap-2 bg-muted/40 rounded-2xl px-3.5 py-2.5 border border-border/50 focus-within:border-blue-400 transition-colors">
-          <button
-            className="flex-shrink-0 mb-0.5 text-muted-foreground hover:text-foreground transition-colors"
-            title="Attach file (coming soon)"
-            onClick={() => {}}
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
+      <CardFooter className="flex-col items-stretch gap-1.5 border-t border-gray-100 py-4 dark:border-white/10 [.border-t]:pt-4">
+        <div className="flex items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-2 transition-colors focus-within:border-indigo-300 focus-within:ring-[3px] focus-within:ring-indigo-500/10 dark:border-white/10 dark:bg-white/[0.03] dark:focus-within:border-indigo-500/40">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/10 dark:hover:text-gray-200"
+                aria-label="Attach file (coming soon)"
+                onClick={() => {}}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Attach file (coming soon)</TooltipContent>
+          </Tooltip>
 
-          <textarea
+          <Textarea
             ref={textareaRef}
             rows={1}
             placeholder="Type a message…"
@@ -429,23 +479,26 @@ export default function TicketChat({
                 Math.min(e.target.scrollHeight, 120) + "px"
             }}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent resize-none text-sm outline-none placeholder:text-muted-foreground overflow-y-auto leading-relaxed py-0.5 max-h-[120px]"
+            className="max-h-[120px] min-h-9 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-relaxed shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
 
           <Button
+            type="button"
+            variant="gradient"
             size="icon"
             onClick={handleSend}
             disabled={!text.trim()}
-            className="flex-shrink-0 h-8 w-8 rounded-xl mb-0.5 bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            className="shrink-0 rounded-xl hover:translate-y-0"
+            aria-label="Send message"
           >
-            <Send className="h-3.5 w-3.5" />
+            <Send className="h-4 w-4" />
           </Button>
         </div>
 
-        <p className="text-[10px] text-muted-foreground mt-1.5 px-1 select-none">
+        <p className="px-1 text-[10px] text-gray-400 select-none dark:text-gray-500">
           Enter to send · Shift+Enter for new line
         </p>
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   )
 }
