@@ -4,6 +4,7 @@ import * as React from "react"
 import * as XLSX from "xlsx"
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
+import { fetchAllRows } from "@/lib/fetch-all-rows"
 import {
   getUserAccessibleDomains,
   buildEmailDomainFilter,
@@ -319,25 +320,38 @@ export default function AssetsPage() {
     const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
     const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
 
+    // fetchAllRows: Supabase returns max 1000 rows per request
     const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }] =
       await Promise.all([
         // "*" keeps the list working even before organization_id exists
         // (supabase/migration_asset_organization.sql not yet run)
-        supabase
-          .from("assets")
-          .select("*")
-          .order("created_at", { ascending: false }),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("assets")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(from, to)
+        ),
 
-        supabase
-          .from("asset_assignments")
-          .select("asset_id, user_id")
-          .is("returned_at", null),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("asset_assignments")
+            .select("asset_id, user_id")
+            .is("returned_at", null)
+            .order("id")
+            .range(from, to)
+        ),
 
         // Only look up users within accessible org(s)
-        supabase
-          .from("users")
-          .select("id, email")
-          .or(buildEmailDomainFilter(domains)),
+        fetchAllRows((from, to) =>
+          supabase
+            .from("users")
+            .select("id, email")
+            .or(buildEmailDomainFilter(domains))
+            .order("id")
+            .range(from, to)
+        ),
 
         supabase.from("organizations").select("id, name, domain").order("name"),
       ])
@@ -607,10 +621,18 @@ export default function AssetsPage() {
       { data: assignments },
       { data: users },
     ] = await Promise.all([
-      supabase.from("assets").select("*"),
-      supabase.from("asset_details").select("asset_id, key, value"),
-      supabase.from("asset_assignments").select("asset_id, user_id").is("returned_at", null),
-      supabase.from("users").select("id, email"),
+      fetchAllRows((from, to) =>
+        supabase.from("assets").select("*").order("id").range(from, to)
+      ),
+      fetchAllRows((from, to) =>
+        supabase.from("asset_details").select("asset_id, key, value").order("id").range(from, to)
+      ),
+      fetchAllRows((from, to) =>
+        supabase.from("asset_assignments").select("asset_id, user_id").is("returned_at", null).order("id").range(from, to)
+      ),
+      fetchAllRows((from, to) =>
+        supabase.from("users").select("id, email").order("id").range(from, to)
+      ),
     ])
 
     const assets = (allAssets ?? []).filter((a) => ids.has(a.id))
