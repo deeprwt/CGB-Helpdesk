@@ -269,7 +269,7 @@ export default function EmployeeTable() {
           <div className="flex min-w-[220px] items-center gap-3">
             <Avatar className="h-9 w-9">
               <AvatarImage src={user.avatar} alt={user.name} />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+              <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
                 {getInitials(user.name)}
               </AvatarFallback>
             </Avatar>
@@ -363,7 +363,7 @@ export default function EmployeeTable() {
                     variant="ghost"
                     aria-label={`View ${user.name}`}
                     onClick={() => router.push(`/profile/${user.id}`)}
-                    className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                    className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
                   >
                     <Eye />
                   </Button>
@@ -431,7 +431,7 @@ export default function EmployeeTable() {
           <ListFilter />
           Role
           {roleFilter.length > 0 && (
-            <span className="rounded-full bg-indigo-50 px-1.5 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+            <span className="rounded-full bg-brand-50 px-1.5 text-[11px] font-semibold text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
               {roleFilter.length}
             </span>
           )}
@@ -499,7 +499,7 @@ export default function EmployeeTable() {
 
   const selectionBar =
     selectedCount > 0 ? (
-      <div className="flex items-center justify-between gap-3 rounded-xl bg-indigo-50/60 px-3 py-1.5 text-sm text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/20">
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-brand-50/60 px-3 py-1.5 text-sm text-brand-700 ring-1 ring-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/20">
         <span>
           <span className="font-semibold">{selectedCount}</span> of{" "}
           {filteredData.length} selected
@@ -508,7 +508,7 @@ export default function EmployeeTable() {
           variant="ghost"
           size="sm"
           onClick={() => setRowSelection({})}
-          className="h-8 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+          className="h-8 text-brand-700 hover:bg-brand-100 hover:text-brand-800 dark:text-brand-300 dark:hover:bg-brand-500/15"
         >
           Clear selection
         </Button>
@@ -558,7 +558,6 @@ export default function EmployeeTable() {
         onRowSelectionChange={setRowSelection}
         columnVisibility={columnVisibility}
         pageSize={10}
-        pageSizeOptions={[10, 20, 50]}
         entityName="users"
         emptyIcon={Users}
         emptyTitle="No users found"

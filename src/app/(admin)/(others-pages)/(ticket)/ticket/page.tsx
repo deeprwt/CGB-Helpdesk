@@ -19,7 +19,7 @@ export default function BlankPage() {
         title="Tickets"
         description="Track, pick up and resolve support requests in one place."
         actions={
-          <Button variant="gradient" asChild>
+          <Button asChild>
             <Link href="/create-ticket">
               <Plus />
               New Ticket

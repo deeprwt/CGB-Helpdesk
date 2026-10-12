@@ -171,7 +171,7 @@ export default function TeammatesCard() {
               asChild
               variant="ghost"
               size="sm"
-              className="text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+              className="text-brand-600 hover:bg-brand-50 hover:text-brand-700 dark:text-brand-300 dark:hover:bg-brand-500/10"
             >
               <Link href="/engineers">
                 View All
@@ -203,7 +203,7 @@ export default function TeammatesCard() {
                       src={engineer.avatar_url ?? undefined}
                       alt={engineer.full_name}
                     />
-                    <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                    <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
                       {getInitials(engineer.full_name)}
                     </AvatarFallback>
                   </Avatar>

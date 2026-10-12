@@ -80,20 +80,20 @@ export function PageHeader({
     return (
       <section
         className={cn(
-          "relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/70 p-5 sm:p-6",
-          "dark:border-indigo-500/20 dark:from-indigo-500/10 dark:via-gray-900 dark:to-purple-500/10",
+          "relative overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 via-white to-blue-light-50/70 p-5 sm:p-6",
+          "dark:border-brand-500/20 dark:from-brand-500/10 dark:via-gray-900 dark:to-blue-light-500/10",
           className
         )}
       >
         {/* Decorative glow blobs */}
-        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-indigo-200/40 blur-3xl dark:bg-indigo-500/10" />
-        <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-purple-200/40 blur-3xl dark:bg-purple-500/10" />
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-200/40 blur-3xl dark:bg-brand-500/10" />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-blue-light-200/40 blur-3xl dark:bg-blue-light-500/10" />
 
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             {breadcrumbs && breadcrumbs.length > 0 && <Crumbs items={breadcrumbs} />}
             {eyebrow && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-600 shadow-sm ring-1 ring-indigo-100 dark:bg-gray-900/80 dark:text-indigo-300 dark:ring-indigo-500/20">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-brand-600 shadow-sm ring-1 ring-brand-100 dark:bg-gray-900/80 dark:text-brand-300 dark:ring-brand-500/20">
                 {EyebrowIcon && <EyebrowIcon className="h-3 w-3" />}
                 {eyebrow}
               </span>
@@ -109,7 +109,7 @@ export function PageHeader({
                 {meta.map((m, i) => (
                   <span key={i} className="flex items-center gap-1.5">
                     <span
-                      className={cn("inline-block h-1.5 w-1.5 rounded-full", m.dot ?? "bg-indigo-400")}
+                      className={cn("inline-block h-1.5 w-1.5 rounded-full", m.dot ?? "bg-brand-400")}
                     />
                     {m.label}
                   </span>

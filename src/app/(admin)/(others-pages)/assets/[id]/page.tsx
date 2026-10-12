@@ -231,7 +231,7 @@ const historyColumns: ColumnDef<AssignmentHistoryRow>[] = [
     cell: ({ row }) => (
       <div className="flex min-w-0 items-center gap-2.5">
         <Avatar className="size-7">
-          <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+          <AvatarFallback className="bg-brand-500 text-[10px] font-semibold text-white">
             {emailInitials(row.original.user_email)}
           </AvatarFallback>
         </Avatar>
@@ -427,7 +427,7 @@ export default function AssetDetailsPage() {
           meta={[
             { label: status.label, dot: status.dot },
             ...(asset.organization
-              ? [{ label: asset.organization.name, dot: "bg-indigo-400" }]
+              ? [{ label: asset.organization.name, dot: "bg-brand-400" }]
               : []),
             ...(asset.location
               ? [{ label: asset.location, dot: "bg-sky-400" }]
@@ -451,7 +451,7 @@ export default function AssetDetailsPage() {
                 )}
                 Delete
               </Button>
-              <Button variant="gradient" asChild>
+              <Button asChild>
                 <Link href={`/assets/edit/${asset.id}`}>
                   <Pencil className="size-4" />
                   Edit
@@ -475,7 +475,7 @@ export default function AssetDetailsPage() {
           <Card className="lg:col-span-2">
             <SectionHeader
               icon={Package}
-              tone="bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20"
+              tone="bg-brand-50 text-brand-600 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20"
               title="Asset basics"
               description="Identity, ownership and placement"
             />
@@ -520,7 +520,7 @@ export default function AssetDetailsPage() {
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-3 rounded-xl bg-gray-50/70 p-3 ring-1 ring-gray-100 dark:bg-white/[0.03] dark:ring-white/5">
                     <Avatar className="size-10">
-                      <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                      <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
                         {emailInitials(current.user_email)}
                       </AvatarFallback>
                     </Avatar>

@@ -45,7 +45,7 @@ export default function UserDropdown() {
         <Button variant="ghost" className="h-11 gap-3 rounded-full pl-1 pr-3 text-gray-700 dark:text-gray-300">
           <Avatar className="h-9 w-9">
             <AvatarImage src={user.avatar_url ?? undefined} />
-            <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+            <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
               {getInitials(user.full_name)}
             </AvatarFallback>
           </Avatar>
@@ -65,14 +65,14 @@ export default function UserDropdown() {
         <DropdownMenuLabel className="flex items-center gap-3 font-normal">
           <Avatar className="h-10 w-10">
             <AvatarImage src={user.avatar_url ?? undefined} />
-            <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+            <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
               {getInitials(user.full_name)}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{user.full_name}</p>
             <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user.email}</p>
-            <span className="mt-1 inline-block rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+            <span className="mt-1 inline-block rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
               {roleLabel(user.role)}
             </span>
           </div>

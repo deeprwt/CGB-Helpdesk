@@ -118,7 +118,7 @@ export default function UserLatestTickets() {
         row.original.requester_name ? (
           <div className="flex items-center gap-2.5">
             <Avatar className="size-7">
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[11px] font-semibold text-white">
+              <AvatarFallback className="bg-brand-500 text-[11px] font-semibold text-white">
                 {getInitials(row.original.requester_name)}
               </AvatarFallback>
             </Avatar>
@@ -173,7 +173,7 @@ export default function UserLatestTickets() {
               variant="ghost"
               size="icon-sm"
               aria-label="View ticket"
-              className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+              className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
               onClick={() => router.push(`/ticket/${row.original.id}`)}
             >
               <Eye />
@@ -202,7 +202,7 @@ export default function UserLatestTickets() {
       emptyTitle="No tickets found."
       emptyDescription="Tickets you raise will appear here."
       emptyAction={
-        <Button variant="gradient" size="sm" asChild>
+        <Button size="sm" asChild>
           <Link href="/create-ticket">
             <Plus />
             New Ticket

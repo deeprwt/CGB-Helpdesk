@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 
 const inputClass =
-  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-indigo-400 focus-visible:ring-indigo-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-brand-400 focus-visible:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
 
 const leadingIconClass =
   "pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500"
@@ -113,7 +113,7 @@ export default function UpdatePswdForm() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Request a new reset link from the sign in page.
           </p>
-          <Button asChild variant="gradient" className="mt-6 h-12 w-full font-semibold">
+          <Button asChild className="mt-6 h-12 w-full font-semibold">
             <Link href="/signin">Go to Sign In</Link>
           </Button>
         </div>
@@ -131,7 +131,7 @@ export default function UpdatePswdForm() {
 
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center pb-10">
         <div className="mb-8">
-          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-500/25">
+          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-white shadow-md shadow-brand-500/25">
             <KeyRound className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
@@ -194,7 +194,6 @@ export default function UpdatePswdForm() {
 
             <Button
               type="submit"
-              variant="gradient"
               className="h-12 w-full font-semibold"
               disabled={loading}
             >

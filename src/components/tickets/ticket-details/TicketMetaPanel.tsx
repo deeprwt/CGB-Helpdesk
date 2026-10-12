@@ -148,8 +148,8 @@ const PRIORITY: Record<Props["priority"], { label: string; tone: BadgeTone }> = 
 }
 
 const AVATAR_GRADIENTS = [
-  "from-indigo-500 to-purple-500",
-  "from-sky-500 to-indigo-500",
+  "from-brand-500 to-brand-600",
+  "from-sky-500 to-brand-500",
   "from-emerald-500 to-teal-500",
   "from-amber-500 to-orange-500",
   "from-rose-500 to-pink-500",
@@ -157,7 +157,7 @@ const AVATAR_GRADIENTS = [
 ]
 
 const PROGRESS_TONE = {
-  indigo: "[&_[data-slot=progress-indicator]]:bg-indigo-500",
+  indigo: "[&_[data-slot=progress-indicator]]:bg-brand-500",
   emerald: "[&_[data-slot=progress-indicator]]:bg-emerald-500",
   amber: "[&_[data-slot=progress-indicator]]:bg-amber-500",
   red: "[&_[data-slot=progress-indicator]]:bg-red-500",
@@ -298,7 +298,7 @@ export default function TicketMetaPanel({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
                 aria-label="Edit ticket"
               >
                 <Pencil className="h-4 w-4" />
@@ -349,7 +349,7 @@ export default function TicketMetaPanel({
             <span className="flex min-w-0 items-center gap-2">
               <Avatar className="h-7 w-7">
                 <AvatarImage src={requesterAvatar ?? undefined} />
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
                   {initials(requesterName)}
                 </AvatarFallback>
               </Avatar>
@@ -466,7 +466,7 @@ export default function TicketMetaPanel({
           <div className="rounded-xl border border-gray-100 bg-gray-50/70 p-4 dark:border-white/10 dark:bg-white/[0.03]">
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white">
-                <Clock className="h-4 w-4 text-indigo-500 dark:text-indigo-300" />
+                <Clock className="h-4 w-4 text-brand-500 dark:text-brand-300" />
                 Time tracking
               </p>
               <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -476,7 +476,7 @@ export default function TicketMetaPanel({
 
             <Progress
               value={progress}
-              className="mt-3 h-2 bg-gray-200 dark:bg-white/10 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-indigo-500 [&_[data-slot=progress-indicator]]:to-purple-500"
+              className="mt-3 h-2 bg-gray-200 dark:bg-white/10 [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-brand-500 [&_[data-slot=progress-indicator]]:to-brand-600"
             />
 
             <div className="mt-2 flex items-center justify-between gap-3 text-xs">
@@ -512,7 +512,7 @@ export default function TicketMetaPanel({
               <Button
                 variant="ghost"
                 size="icon"
-                className="rounded-xl bg-violet-50 text-violet-600 hover:bg-violet-100 hover:text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 dark:hover:bg-violet-500/25"
+                className="rounded-xl bg-brand-50 text-brand-600 hover:bg-brand-100 hover:text-brand-700 dark:bg-brand-500/15 dark:text-brand-300 dark:hover:bg-brand-500/25"
                 aria-label="Attachments"
                 onClick={() => {
                   if (attachments.length === 0) {

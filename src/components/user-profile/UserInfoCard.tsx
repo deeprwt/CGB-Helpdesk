@@ -238,7 +238,7 @@ export default function UserInfoCard({
   if (!profile) {
     return (
       <>
-        <div className="order-first rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/70 p-5 sm:p-6 lg:col-span-2 dark:border-indigo-500/20 dark:from-indigo-500/10 dark:via-gray-900 dark:to-purple-500/10">
+        <div className="order-first rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 via-white to-blue-light-50/70 p-5 sm:p-6 lg:col-span-2 dark:border-brand-500/20 dark:from-brand-500/10 dark:via-gray-900 dark:to-blue-light-500/10">
           <Skeleton className="h-5 w-24 rounded-full" />
           <div className="mt-3 flex items-center gap-4">
             <Skeleton className="size-16 rounded-full" />
@@ -272,8 +272,8 @@ export default function UserInfoCard({
   const subtitle = [profile.designation, profile.department].filter(Boolean).join(" · ")
 
   const meta: PageHeaderMetaItem[] = [{ label: profile.email, dot: "bg-emerald-400" }]
-  if (location) meta.push({ label: location, dot: "bg-indigo-400" })
-  if (profile.phone) meta.push({ label: profile.phone, dot: "bg-purple-400" })
+  if (location) meta.push({ label: location, dot: "bg-brand-400" })
+  if (profile.phone) meta.push({ label: profile.phone, dot: "bg-brand-400" })
 
   const fieldValue = (name: string) =>
     (profile as Record<string, string | null>)[name] ?? ""
@@ -290,7 +290,7 @@ export default function UserInfoCard({
           <span className="flex items-center gap-4">
             <Avatar className="size-16 shadow-md ring-4 ring-white dark:ring-gray-900">
               <AvatarImage src={profile.avatar_url ?? ""} className="object-cover" />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-lg font-semibold text-white">
+              <AvatarFallback className="bg-brand-500 text-lg font-semibold text-white">
                 {getInitials(profile.full_name)}
               </AvatarFallback>
             </Avatar>
@@ -312,7 +312,7 @@ export default function UserInfoCard({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2.5 text-base text-gray-900 dark:text-white">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
               <IdCard className="h-4 w-4" />
             </span>
             Personal Information

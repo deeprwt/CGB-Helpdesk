@@ -4,7 +4,7 @@ import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
 import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
-import { DataTable } from "@/components/ui/data-table"
+import { DataTable, DATA_TABLE_ALL_ROWS } from "@/components/ui/data-table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -19,7 +19,7 @@ import { getInitials } from "@/hooks/useCurrentUser"
 import { sendNotification, sendEmailNotification } from "@/lib/notify"
 import { logActivity } from "@/lib/activity"
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 50
 
 type Ticket = {
   id: string
@@ -45,7 +45,9 @@ export default function EngineerTicketTable() {
   const [category, setCategory] = React.useState("all")
 
   const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [hasNext, setHasNext] = React.useState(false)
+  const [total, setTotal] = React.useState<number | undefined>(undefined)
   const [loading, setLoading] = React.useState(true)
 
   const loadTickets = async () => {
@@ -55,14 +57,16 @@ export default function EngineerTicketTable() {
 
     if (!user) return
 
-    const from = (page - 1) * PAGE_SIZE
-    const to = from + PAGE_SIZE - 1
+    const from = (page - 1) * pageSize
+    const to = from + pageSize - 1
 
     let query = supabase
       .from("tickets")
       .select("*", { count: "exact" })
       .order("created_at", { ascending: false })
-      .range(from, to)
+
+    // "All" skips the range; Supabase's own max-rows setting still caps the response
+    if (pageSize !== DATA_TABLE_ALL_ROWS) query = query.range(from, to)
 
     if (tab === "queue") {
       // Queue: unassigned tickets scoped to this engineer's org(s)
@@ -78,6 +82,7 @@ export default function EngineerTicketTable() {
       if (orgUserIds.length === 0) {
         setTickets([])
         setHasNext(false)
+        setTotal(0)
         return
       }
 
@@ -99,7 +104,8 @@ export default function EngineerTicketTable() {
     }
 
     setTickets(data ?? [])
-    setHasNext((count ?? 0) > page * PAGE_SIZE)
+    setHasNext((count ?? 0) > page * pageSize)
+    setTotal(count ?? undefined)
   }
 
   React.useEffect(() => {
@@ -122,7 +128,7 @@ export default function EngineerTicketTable() {
       active = false
       supabase.removeChannel(channel)
     }
-  }, [tab, search, status, category, page])
+  }, [tab, search, status, category, page, pageSize])
 
   const acquireTicket = async (ticketId: string, requesterId: string) => {
     const {
@@ -232,7 +238,7 @@ export default function EngineerTicketTable() {
       cell: ({ row }) => (
         <div className="flex items-center gap-2.5">
           <Avatar className="size-7">
-            <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[11px] font-semibold text-white">
+            <AvatarFallback className="bg-brand-500 text-[11px] font-semibold text-white">
               {getInitials(row.original.requester_name)}
             </AvatarFallback>
           </Avatar>
@@ -291,7 +297,7 @@ export default function EngineerTicketTable() {
                 variant="ghost"
                 size="icon-sm"
                 aria-label="View ticket"
-                className="text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-gray-400 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
                 onClick={() => router.push(`/ticket/${t.id}`)}
               >
                 <Eye />
@@ -351,9 +357,14 @@ export default function EngineerTicketTable() {
       }
       pagination={{
         pageIndex: page - 1,
-        pageSize: PAGE_SIZE,
+        pageSize,
+        totalRows: total,
         hasNextPage: hasNext,
         onPageChange: (i) => setPage(i + 1),
+        onPageSizeChange: (size) => {
+          setPageSize(size)
+          setPage(1)
+        },
       }}
       entityName="tickets"
       emptyIcon={tab === "queue" ? Inbox : ListTodo}

@@ -44,9 +44,9 @@ export default function UserMetaCard() {
         <CardContent className="lg:px-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex w-full flex-col items-center gap-6 xl:flex-row">
-              <Avatar className="size-20 shadow-md ring-4 ring-indigo-50 dark:ring-indigo-500/20">
+              <Avatar className="size-20 shadow-md ring-4 ring-brand-50 dark:ring-brand-500/20">
                 <AvatarImage src="/images/user/owner.jpg" alt="user" className="object-cover" />
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-lg font-semibold text-white">
+                <AvatarFallback className="bg-brand-500 text-lg font-semibold text-white">
                   MC
                 </AvatarFallback>
               </Avatar>
@@ -68,7 +68,7 @@ export default function UserMetaCard() {
                         asChild
                         variant="outline"
                         size="icon-lg"
-                        className="rounded-full text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-300"
+                        className="rounded-full text-gray-500 hover:text-brand-600 dark:text-gray-400 dark:hover:text-brand-300"
                       >
                         <a href={href} target="_blank" rel="noreferrer" aria-label={label}>
                           <Icon className="size-5" />

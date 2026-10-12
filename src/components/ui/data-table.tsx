@@ -54,6 +54,11 @@ declare module "@tanstack/react-table" {
   }
 }
 
+/** Page size used for the "All" choice in the rows-per-page selector. */
+export const DATA_TABLE_ALL_ROWS = Number.MAX_SAFE_INTEGER
+
+export const DEFAULT_PAGE_SIZE_OPTIONS = [10, 50, 100, 500, 1000]
+
 /** Server-side pagination. When passed, the table stops paging/filtering rows itself. */
 export type DataTablePagination = {
   /** 0-based page index */
@@ -64,6 +69,8 @@ export type DataTablePagination = {
   /** Used instead of `totalRows` when the total is unknown */
   hasNextPage?: boolean
   onPageChange: (pageIndex: number) => void
+  /** Enables the rows-per-page selector; receives `DATA_TABLE_ALL_ROWS` for "All" */
+  onPageSizeChange?: (pageSize: number) => void
 }
 
 export interface DataTableProps<TData, TValue = unknown> {
@@ -87,9 +94,9 @@ export interface DataTableProps<TData, TValue = unknown> {
   toolbarActions?: React.ReactNode
   /** Slot between the toolbar and the table (tabs, bulk-action bar…) */
   subHeader?: React.ReactNode
-  /** Client-side page size (default 10) */
+  /** Initial client-side page size (default 10) */
   pageSize?: number
-  /** Client-side "rows per page" choices; omit to hide the selector */
+  /** "Rows per page" choices (an "All" choice is always added); pass `[]` to hide the selector */
   pageSizeOptions?: number[]
   pagination?: DataTablePagination
   /** Noun used in the footer: "Showing 1–10 of 42 tickets" */
@@ -126,7 +133,7 @@ export function DataTable<TData, TValue = unknown>({
   toolbarActions,
   subHeader,
   pageSize = 10,
-  pageSizeOptions,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
   pagination,
   entityName = "results",
   emptyIcon: EmptyIcon = Inbox,
@@ -210,6 +217,13 @@ export function DataTable<TData, TValue = unknown>({
   const goTo = (index: number) => {
     if (isManual) pagination.onPageChange(index)
     else table.setPageIndex(index)
+  }
+
+  const showPageSize =
+    pageSizeOptions.length > 0 && (!isManual || !!pagination.onPageSizeChange)
+  const changePageSize = (size: number) => {
+    if (isManual) pagination.onPageSizeChange?.(size)
+    else setClientPagination({ pageIndex: 0, pageSize: size })
   }
 
   const hasToolbar = !!(title || description || searchable || filters || toolbarActions)
@@ -371,7 +385,7 @@ export function DataTable<TData, TValue = unknown>({
           bare ? "pt-4" : "border-t border-gray-200 px-5 py-3 dark:border-white/10"
         )}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {loading
               ? "Loading…"
@@ -381,22 +395,32 @@ export function DataTable<TData, TValue = unknown>({
                   ? `Showing ${firstRow}–${lastRow} of ${totalRows} ${entityName}`
                   : `Showing ${firstRow}–${lastRow} ${entityName}`}
           </p>
-          {!isManual && pageSizeOptions && pageSizeOptions.length > 0 && (
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="text-sm text-gray-500 dark:text-gray-400">Rows</span>
+          {showPageSize && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Rows per page</span>
               <Select
-                value={String(clientPagination.pageSize)}
-                onValueChange={(v) => setClientPagination({ pageIndex: 0, pageSize: Number(v) })}
+                value={
+                  effectivePageSize === DATA_TABLE_ALL_ROWS ? "all" : String(effectivePageSize)
+                }
+                onValueChange={(v) =>
+                  changePageSize(v === "all" ? DATA_TABLE_ALL_ROWS : Number(v))
+                }
               >
-                <SelectTrigger size="sm" className="w-[72px]">
+                <SelectTrigger size="sm" className="w-[84px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {pageSizeOptions.map((n) => (
+                  {/* Keep the current size selectable even if it isn't a listed option */}
+                  {(pageSizeOptions.includes(effectivePageSize) ||
+                  effectivePageSize === DATA_TABLE_ALL_ROWS
+                    ? pageSizeOptions
+                    : [...pageSizeOptions, effectivePageSize].sort((a, b) => a - b)
+                  ).map((n) => (
                     <SelectItem key={n} value={String(n)}>
-                      {n}
+                      {n.toLocaleString()}
                     </SelectItem>
                   ))}
+                  <SelectItem value="all">All</SelectItem>
                 </SelectContent>
               </Select>
             </div>

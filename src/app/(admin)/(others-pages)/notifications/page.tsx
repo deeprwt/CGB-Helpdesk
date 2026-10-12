@@ -244,7 +244,7 @@ export default function NotificationsPage() {
               <TabsTrigger key={tab.key} value={tab.key} className="flex-none px-3">
                 {tab.label}
                 {!!tab.count && (
-                  <span className="rounded-full bg-indigo-100 px-1.5 py-px text-[10px] font-semibold leading-4 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
+                  <span className="rounded-full bg-brand-100 px-1.5 py-px text-[10px] font-semibold leading-4 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
                     {tab.count}
                   </span>
                 )}
@@ -313,14 +313,14 @@ export default function NotificationsPage() {
                       href={`/ticket/${n.ticket_id}`}
                       className={cn(
                         "group flex items-start gap-4 px-5 py-4 transition-colors hover:bg-gray-50 dark:hover:bg-white/[0.03]",
-                        !n.is_read && "bg-indigo-50/50 dark:bg-indigo-500/[0.06]"
+                        !n.is_read && "bg-brand-50/50 dark:bg-brand-500/[0.06]"
                       )}
                     >
                       {/* Avatar + type chip */}
                       <div className="relative shrink-0">
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={n.actor?.avatar_url ?? undefined} />
-                          <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+                          <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
                             {actorInitial}
                           </AvatarFallback>
                         </Avatar>
@@ -356,7 +356,7 @@ export default function NotificationsPage() {
                       <div className="flex shrink-0 items-center gap-2 self-center">
                         {!n.is_read && (
                           <>
-                            <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                            <span className="h-2 w-2 rounded-full bg-brand-500" />
                             <span className="sr-only">Unread</span>
                           </>
                         )}

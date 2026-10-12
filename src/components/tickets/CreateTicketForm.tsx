@@ -61,7 +61,7 @@ import { getInitials } from "@/hooks/useCurrentUser"
 ----------------------------------- */
 const CHIP_TONES = {
   indigo:
-    "bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20",
+    "bg-brand-50 text-brand-600 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20",
   violet:
     "bg-violet-50 text-violet-600 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/20",
   emerald:
@@ -101,7 +101,7 @@ function formatFileSize(bytes: number) {
 }
 
 const RADIO_PILL =
-  "mb-0 cursor-pointer rounded-full border border-gray-200 px-3 py-1.5 text-sm font-normal has-[[data-state=checked]]:border-indigo-300 has-[[data-state=checked]]:bg-indigo-50/60 dark:border-white/10 dark:text-gray-300 dark:has-[[data-state=checked]]:border-indigo-500/40 dark:has-[[data-state=checked]]:bg-indigo-500/10"
+  "mb-0 cursor-pointer rounded-full border border-gray-200 px-3 py-1.5 text-sm font-normal has-[[data-state=checked]]:border-brand-300 has-[[data-state=checked]]:bg-brand-50/60 dark:border-white/10 dark:text-gray-300 dark:has-[[data-state=checked]]:border-brand-500/40 dark:has-[[data-state=checked]]:bg-brand-500/10"
 
 /* -----------------------------------
    Category → Sub Category Map (FULL)
@@ -373,7 +373,7 @@ export default function CreateTicketForm() {
                         <span className="flex min-w-0 items-center gap-2">
                           {selectedUser && (
                             <Avatar className="size-6">
-                              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+                              <AvatarFallback className="bg-brand-500 text-[10px] font-semibold text-white">
                                 {getInitials(selectedUser.full_name)}
                               </AvatarFallback>
                             </Avatar>
@@ -625,11 +625,11 @@ export default function CreateTicketForm() {
                   className={cn(
                     "items-center gap-3 border-2 border-dashed px-6 py-8 text-center shadow-none transition-colors",
                     dragActive
-                      ? "border-indigo-400 bg-indigo-50/60 dark:border-indigo-500/60 dark:bg-indigo-500/10"
+                      ? "border-brand-400 bg-brand-50/60 dark:border-brand-500/60 dark:bg-brand-500/10"
                       : "border-gray-200 bg-gray-50/60 dark:border-white/10 dark:bg-white/[0.02]"
                   )}
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:text-indigo-300 dark:ring-white/10">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:text-brand-300 dark:ring-white/10">
                     <UploadCloud className="size-5" />
                   </span>
                   <div className="flex flex-col gap-0.5">
@@ -692,7 +692,7 @@ export default function CreateTicketForm() {
         <Button variant="outline" asChild>
           <Link href="/ticket">Cancel</Link>
         </Button>
-        <Button type="submit" variant="gradient" disabled={loading}>
+        <Button type="submit" disabled={loading}>
           {loading ? <Loader2 className="animate-spin" /> : <Send />}
           {loading ? "Creating..." : "Create Ticket"}
         </Button>

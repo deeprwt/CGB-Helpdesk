@@ -84,6 +84,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import RoleGate from "@/components/auth/RoleGate"
+import { useCurrentUser } from "@/hooks/useCurrentUser"
 import {
   FilterPanel,
   FilterSection,
@@ -160,13 +161,13 @@ function ExportOption({
   return (
     <FieldLabel
       htmlFor={id}
-      className="mb-0 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal leading-normal transition-colors hover:border-indigo-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[[data-state=checked]]:border-indigo-300 has-[[data-state=checked]]:bg-indigo-50/60 dark:border-white/10 dark:hover:border-indigo-500/30 dark:has-[[data-state=checked]]:border-indigo-500/40 dark:has-[[data-state=checked]]:bg-indigo-500/10"
+      className="mb-0 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal leading-normal transition-colors hover:border-brand-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[[data-state=checked]]:border-brand-300 has-[[data-state=checked]]:bg-brand-50/60 dark:border-white/10 dark:hover:border-brand-500/30 dark:has-[[data-state=checked]]:border-brand-500/40 dark:has-[[data-state=checked]]:bg-brand-500/10"
     >
       <RadioGroupItem
         id={id}
         value={value}
         disabled={disabled}
-        className="mt-0.5 text-indigo-500 data-[state=checked]:border-indigo-500 [&_svg]:fill-indigo-500"
+        className="mt-0.5 text-brand-500 data-[state=checked]:border-brand-500 [&_svg]:fill-brand-500"
       />
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-sm font-medium text-gray-900 dark:text-white">
@@ -203,7 +204,7 @@ type AssetRow = Asset & {
   assigned_email: string | null
 }
 
-const PAGE_SIZE = 10
+const DEFAULT_PAGE_SIZE = 10
 
 /* ---------------- FILTERS ---------------- */
 
@@ -303,6 +304,7 @@ export default function AssetsPage() {
   const [showFilters, setShowFilters] = React.useState(false)
 
   const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
   const [importOpen, setImportOpen] = React.useState(false)
@@ -520,11 +522,9 @@ export default function AssetsPage() {
   }, [filters, added, search])
 
   /* ---------------- PAGINATION ---------------- */
-  const totalPages = Math.max(1, Math.ceil(filteredAssets.length / PAGE_SIZE))
-
   const paginatedAssets = filteredAssets.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE
+    (page - 1) * pageSize,
+    page * pageSize
   )
 
   /* ---------------- SELECTION ---------------- */
@@ -536,6 +536,11 @@ export default function AssetsPage() {
     } else {
       setSelected(new Set())
     }
+  }
+
+  // Select every asset matching the current filters, across all pages
+  const selectAllFiltered = () => {
+    setSelected(new Set(filteredAssets.map((a) => a.id)))
   }
 
   const toggleOne = (id: string) => {
@@ -557,6 +562,43 @@ export default function AssetsPage() {
 
     toast.success("Asset deleted")
     loadAssets()
+  }
+
+  /* ---------------- DELETE (BULK, ADMINS ONLY) ---------------- */
+  const { user: me } = useCurrentUser()
+  const canBulkDelete = me?.role === "admin" || me?.role === "superadmin"
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
+
+  // Same three deletes as a single row, run in chunks so the id list stays URL-safe
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    const toastId = toast.loading(`Deleting ${ids.length} asset${ids.length === 1 ? "" : "s"}…`)
+    let deleted = 0
+    try {
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100)
+        const r1 = await supabase.from("asset_assignments").delete().in("asset_id", chunk)
+        if (r1.error) throw r1.error
+        const r2 = await supabase.from("asset_details").delete().in("asset_id", chunk)
+        if (r2.error) throw r2.error
+        const r3 = await supabase.from("assets").delete().in("id", chunk)
+        if (r3.error) throw r3.error
+        deleted += chunk.length
+      }
+      toast.success(`Deleted ${deleted} asset${deleted === 1 ? "" : "s"}`, { id: toastId })
+    } catch (err) {
+      console.error("Bulk delete failed:", err)
+      toast.error(
+        deleted > 0
+          ? `Deleted ${deleted} of ${ids.length} assets, then an error stopped the rest`
+          : "Failed to delete the selected assets",
+        { id: toastId }
+      )
+    } finally {
+      setSelected(new Set())
+      loadAssets()
+    }
   }
 
 
@@ -902,7 +944,7 @@ export default function AssetsPage() {
           return (
             <div className="flex min-w-0 items-center gap-2.5">
               <Avatar className="size-7">
-                <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+                <AvatarFallback className="bg-brand-500 text-[10px] font-semibold text-white">
                   {emailInitials(a.assigned_email)}
                 </AvatarFallback>
               </Avatar>
@@ -929,7 +971,7 @@ export default function AssetsPage() {
             <RowAction
               label="View asset"
               onClick={() => router.push(`/assets/${a.id}`)}
-              className="hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+              className="hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
             >
               <Eye className="size-4" />
             </RowAction>
@@ -1002,15 +1044,32 @@ export default function AssetsPage() {
   )
 
   /* ---------------- BULK BAR + ACTIVE FILTER CHIPS ---------------- */
+  const allFilteredSelected =
+    filteredAssets.length > 0 && filteredAssets.every((a) => selected.has(a.id))
+
   const subHeader =
     selected.size > 0 || activeChips.length > 0 ? (
       <div className="flex flex-col gap-3">
         {selected.size > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50/70 px-3 py-2 ring-1 ring-indigo-100 dark:bg-indigo-500/10 dark:ring-indigo-500/20">
-            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
-              {selected.size} selected
-            </span>
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-brand-50/70 px-3 py-2 ring-1 ring-brand-100 dark:bg-brand-500/10 dark:ring-brand-500/20">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-sm font-medium text-brand-700 dark:text-brand-300">
+                {allFilteredSelected
+                  ? `All ${selected.size.toLocaleString()} assets selected`
+                  : `${selected.size.toLocaleString()} selected`}
+              </span>
+              {!allFilteredSelected && filteredAssets.length > selected.size && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={selectAllFiltered}
+                  className="h-auto px-0 text-sm font-semibold"
+                >
+                  Select all {filteredAssets.length.toLocaleString()} assets
+                </Button>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
@@ -1030,6 +1089,16 @@ export default function AssetsPage() {
                 <Download className="size-4" />
                 Export selected
               </Button>
+              {canBulkDelete && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBulkDeleteOpen(true)}
+                >
+                  <Trash2 className="size-4" />
+                  Delete selected
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -1040,7 +1109,7 @@ export default function AssetsPage() {
               <Badge
                 key={chip.id}
                 variant="outline"
-                className="gap-1 rounded-full border-indigo-100 bg-indigo-50 py-0.5 pl-3 pr-1 text-xs font-medium text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/15 dark:text-indigo-300"
+                className="gap-1 rounded-full border-brand-100 bg-brand-50 py-0.5 pl-3 pr-1 text-xs font-medium text-brand-700 dark:border-brand-500/20 dark:bg-brand-500/15 dark:text-brand-300"
               >
                 {chip.label}
                 <Button
@@ -1048,7 +1117,7 @@ export default function AssetsPage() {
                   size="icon-sm"
                   onClick={chip.onRemove}
                   aria-label={`Remove ${chip.label}`}
-                  className="size-5 rounded-full text-indigo-500 hover:bg-indigo-100 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-500/20"
+                  className="size-5 rounded-full text-brand-500 hover:bg-brand-100 hover:text-brand-700 dark:text-brand-300 dark:hover:bg-brand-500/20"
                 >
                   <X className="size-3" />
                 </Button>
@@ -1134,7 +1203,7 @@ export default function AssetsPage() {
                         }
                       />
                       <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/60 px-4 py-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
                           <CloudUpload className="size-5" />
                         </span>
                         {file ? (
@@ -1173,7 +1242,6 @@ export default function AssetsPage() {
                       <Button variant="outline">Cancel</Button>
                     </DialogClose>
                     <Button
-                      variant="gradient"
                       disabled={!file}
                       onClick={handleImport}
                     >
@@ -1241,7 +1309,6 @@ export default function AssetsPage() {
                       <Button variant="outline">Cancel</Button>
                     </DialogClose>
                     <Button
-                      variant="gradient"
                       onClick={() => handleExport(exportMode)}
                       disabled={
                         exportMode === "selected" &&
@@ -1256,7 +1323,6 @@ export default function AssetsPage() {
               </Dialog>
 
               <Button
-                variant="gradient"
                 onClick={() => router.push("/assets/create")}
               >
                 <Plus className="size-4" />
@@ -1314,9 +1380,13 @@ export default function AssetsPage() {
             subHeader={subHeader}
             pagination={{
               pageIndex: page - 1,
-              pageSize: PAGE_SIZE,
+              pageSize,
               totalRows: filteredAssets.length,
               onPageChange: (index) => setPage(index + 1),
+              onPageSizeChange: (size) => {
+                setPageSize(size)
+                setPage(1)
+              },
             }}
             entityName="assets"
             getRowId={(r) => r.id}
@@ -1346,7 +1416,7 @@ export default function AssetsPage() {
           <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-sm">
             <SheetHeader className="border-b border-gray-200 px-5 py-4 dark:border-white/10">
               <SheetTitle className="flex items-center gap-2 text-base text-gray-900 dark:text-white">
-                <SlidersHorizontal className="size-4 text-indigo-600 dark:text-indigo-300" />
+                <SlidersHorizontal className="size-4 text-brand-600 dark:text-brand-300" />
                 Filters
                 {activeChips.length > 0 && (
                   <StatusBadge tone="indigo" className="px-2 text-[11px]">
@@ -1367,7 +1437,6 @@ export default function AssetsPage() {
                 Clear all
               </Button>
               <Button
-                variant="gradient"
                 className="flex-1"
                 onClick={() => setShowFilters(false)}
               >
@@ -1388,6 +1457,15 @@ export default function AssetsPage() {
           onConfirm={() => {
             if (deleteId) handleDeleteRow(deleteId)
           }}
+        />
+
+        <ConfirmDialog
+          open={bulkDeleteOpen}
+          onOpenChange={setBulkDeleteOpen}
+          title={`Delete ${selected.size.toLocaleString()} asset${selected.size === 1 ? "" : "s"}?`}
+          description="This permanently removes the selected assets together with their hardware details and assignment records. This cannot be undone."
+          confirmLabel={`Delete ${selected.size.toLocaleString()} asset${selected.size === 1 ? "" : "s"}`}
+          onConfirm={handleBulkDelete}
         />
       </div>
     </RoleGate>

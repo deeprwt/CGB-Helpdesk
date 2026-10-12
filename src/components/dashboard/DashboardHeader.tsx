@@ -50,10 +50,10 @@ export default function DashboardHeader() {
   const firstName = user?.full_name?.split(" ")[0] || "there"
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/70 p-5 sm:p-6 dark:border-indigo-500/20 dark:from-indigo-500/10 dark:via-gray-900 dark:to-purple-500/10">
+    <section className="relative overflow-hidden rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 via-white to-blue-light-50/70 p-5 sm:p-6 dark:border-brand-500/20 dark:from-brand-500/10 dark:via-gray-900 dark:to-blue-light-500/10">
       {/* Decorative glow blobs */}
-      <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-indigo-200/40 blur-3xl dark:bg-indigo-500/10" />
-      <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-purple-200/40 blur-3xl dark:bg-purple-500/10" />
+      <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-200/40 blur-3xl dark:bg-brand-500/10" />
+      <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-blue-light-200/40 blur-3xl dark:bg-blue-light-500/10" />
 
       <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         {/* Left: avatar + greeting */}
@@ -61,7 +61,7 @@ export default function DashboardHeader() {
           <div className="relative shrink-0">
             <Avatar className="h-12 w-12 shadow-md ring-4 ring-white sm:h-14 sm:w-14 dark:ring-gray-900">
               <AvatarImage src={user?.avatar_url ?? undefined} alt={user?.full_name ?? "Your avatar"} />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-sm font-semibold text-white sm:text-base">
+              <AvatarFallback className="bg-brand-500 text-sm font-semibold text-white sm:text-base">
                 {loading ? "" : getInitials(user?.full_name)}
               </AvatarFallback>
             </Avatar>
@@ -79,7 +79,7 @@ export default function DashboardHeader() {
             <div className="flex min-h-[18px] flex-wrap items-center gap-2 text-[11px] font-medium text-gray-500 dark:text-gray-400">
               {today && <span>{today}</span>}
               {user && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-600 shadow-sm ring-1 ring-indigo-100 dark:bg-gray-900/70 dark:text-indigo-300 dark:ring-indigo-500/30">
+                <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-600 shadow-sm ring-1 ring-brand-100 dark:bg-gray-900/70 dark:text-brand-300 dark:ring-brand-500/30">
                   <LifeBuoy className="h-2.5 w-2.5" />
                   {roleLabel(user.role)}
                 </span>
@@ -91,7 +91,7 @@ export default function DashboardHeader() {
               {loading ? (
                 <Skeleton className="inline-block h-7 w-24 align-middle" />
               ) : (
-                <span className="animate-gradient-x bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 bg-[length:200%_auto] bg-clip-text text-transparent dark:from-indigo-400 dark:via-purple-400 dark:to-indigo-400">
+                <span className="animate-gradient-x bg-gradient-to-r from-brand-600 via-blue-light-500 to-brand-600 bg-[length:200%_auto] bg-clip-text text-transparent dark:from-brand-400 dark:via-blue-light-400 dark:to-brand-400">
                   {firstName}
                 </span>
               )}{" "}
@@ -118,7 +118,6 @@ export default function DashboardHeader() {
           </Button>
           <Button
             asChild
-            variant="gradient"
             className="group relative overflow-hidden rounded-xl px-5 font-semibold"
           >
             <Link href="/create-ticket">

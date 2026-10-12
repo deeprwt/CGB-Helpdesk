@@ -88,7 +88,7 @@ function UserCell({ u }: { u: UserRow }) {
     <div className="flex items-center gap-3">
       <Avatar className="h-9 w-9">
         <AvatarImage src={u.avatar_url ?? undefined} />
-        <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-semibold text-white">
+        <AvatarFallback className="bg-brand-500 text-xs font-semibold text-white">
           {initials(u.full_name)}
         </AvatarFallback>
       </Avatar>
@@ -294,7 +294,7 @@ export default function AccessControlPage() {
                       onClick={() =>
                         setRevokeTarget({ userId: u.id, orgId: org.id, orgName: org.name })
                       }
-                      className="size-4 rounded-full p-0 text-indigo-500 hover:bg-red-100 hover:text-red-600 dark:text-indigo-300 dark:hover:bg-red-500/20 dark:hover:text-red-300 [&_svg:not([class*='size-'])]:size-3"
+                      className="size-4 rounded-full p-0 text-brand-500 hover:bg-red-100 hover:text-red-600 dark:text-brand-300 dark:hover:bg-red-500/20 dark:hover:text-red-300 [&_svg:not([class*='size-'])]:size-3"
                     >
                       <X />
                     </Button>
@@ -327,7 +327,7 @@ export default function AccessControlPage() {
                     setNewRole(u.role)
                     setRoleOpen(true)
                   }}
-                  className="text-indigo-500 hover:bg-indigo-50 hover:text-indigo-600 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                  className="text-brand-500 hover:bg-brand-50 hover:text-brand-600 dark:text-brand-300 dark:hover:bg-brand-500/10"
                 >
                   <UserCog className="h-4 w-4" />
                 </Button>
@@ -369,7 +369,7 @@ export default function AccessControlPage() {
           title="Access Control"
           description="Manage user roles and cross-organization access"
           actions={
-            <Button variant="gradient" onClick={() => setGrantOpen(true)}>
+            <Button onClick={() => setGrantOpen(true)}>
               <Plus className="h-4 w-4" />
               Grant Access
             </Button>

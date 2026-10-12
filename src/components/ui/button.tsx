@@ -21,9 +21,6 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline text-brand-500",
         primary:
           "bg-brand-500 text-white shadow-theme-xs hover:bg-brand-600 disabled:bg-brand-300",
-        // Signature CTA from the design system (indigo → purple)
-        gradient:
-          "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md hover:-translate-y-0.5 hover:from-indigo-600 hover:to-purple-600 hover:shadow-lg hover:shadow-indigo-500/25 active:translate-y-0",
       },
       size: {
         default: "h-11 px-5 has-[>svg]:px-4",

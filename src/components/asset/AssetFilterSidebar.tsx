@@ -48,7 +48,7 @@ export function FilterPanel({
     >
       <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-4 py-3 dark:border-white/10">
         <span className="flex items-center gap-2.5 text-sm font-semibold text-gray-900 dark:text-white">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
             <SlidersHorizontal className="size-4" />
           </span>
           Filters
@@ -63,7 +63,7 @@ export function FilterPanel({
             variant="ghost"
             size="sm"
             onClick={onClearAll}
-            className="h-8 px-2.5 text-xs text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+            className="h-8 px-2.5 text-xs text-brand-600 hover:bg-brand-50 hover:text-brand-700 dark:text-brand-300 dark:hover:bg-brand-500/10"
           >
             Clear all
           </Button>
@@ -103,7 +103,7 @@ export function FilterSection({
           <span className="flex items-center gap-2">
             {title}
             {!!badge && (
-              <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 px-1.5 text-[10px] font-semibold leading-4 text-white">
+              <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-brand-500 px-1.5 text-[10px] font-semibold leading-4 text-white">
                 {badge}
               </span>
             )}
@@ -191,7 +191,7 @@ export function FacetFilter({
                 id={id}
                 checked={checked}
                 onCheckedChange={() => onToggle(o.value)}
-                className="data-[state=checked]:border-indigo-500 data-[state=checked]:bg-indigo-500 data-[state=checked]:text-white dark:data-[state=checked]:border-indigo-500 dark:data-[state=checked]:bg-indigo-500"
+                className="data-[state=checked]:border-brand-500 data-[state=checked]:bg-brand-500 data-[state=checked]:text-white dark:data-[state=checked]:border-brand-500 dark:data-[state=checked]:bg-brand-500"
               />
               <span
                 className={cn(
@@ -208,7 +208,7 @@ export function FacetFilter({
                 className={cn(
                   "inline-flex min-w-[24px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium tabular-nums",
                   checked
-                    ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300"
+                    ? "bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-300"
                     : "bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400"
                 )}
               >
@@ -232,7 +232,7 @@ export function FacetFilter({
             setExpanded((v) => !v)
             setQuery("")
           }}
-          className="mt-1 h-auto px-0 py-0.5 text-sm text-indigo-600 has-[>svg]:px-0 dark:text-indigo-300"
+          className="mt-1 h-auto px-0 py-0.5 text-sm text-brand-600 has-[>svg]:px-0 dark:text-brand-300"
         >
           {expanded ? "Show less" : `Show ${hiddenCount} more`}
         </Button>

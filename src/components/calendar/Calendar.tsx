@@ -181,7 +181,7 @@ const Calendar: React.FC = () => {
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[600px]">
           <DialogHeader>
             <div className="flex items-start gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
                 {selectedEvent ? (
                   <CalendarCog className="h-5 w-5" />
                 ) : (
@@ -224,7 +224,7 @@ const Calendar: React.FC = () => {
                   <Label
                     key={key}
                     htmlFor={`modal${key}`}
-                    className="mb-0 cursor-pointer gap-2 rounded-full border border-gray-200 px-3 py-1.5 font-normal text-gray-700 transition-colors hover:bg-gray-50 has-[[data-state=checked]]:border-indigo-300 has-[[data-state=checked]]:bg-indigo-50/60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5 dark:has-[[data-state=checked]]:border-indigo-500/40 dark:has-[[data-state=checked]]:bg-indigo-500/10"
+                    className="mb-0 cursor-pointer gap-2 rounded-full border border-gray-200 px-3 py-1.5 font-normal text-gray-700 transition-colors hover:bg-gray-50 has-[[data-state=checked]]:border-brand-300 has-[[data-state=checked]]:bg-brand-50/60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5 dark:has-[[data-state=checked]]:border-brand-500/40 dark:has-[[data-state=checked]]:bg-brand-500/10"
                   >
                     <RadioGroupItem
                       value={key}
@@ -266,7 +266,7 @@ const Calendar: React.FC = () => {
             <Button type="button" variant="outline" onClick={closeModal}>
               Close
             </Button>
-            <Button type="button" variant="gradient" onClick={handleAddOrUpdateEvent}>
+            <Button type="button" onClick={handleAddOrUpdateEvent}>
               {selectedEvent ? "Update Changes" : "Add Event"}
             </Button>
           </DialogFooter>

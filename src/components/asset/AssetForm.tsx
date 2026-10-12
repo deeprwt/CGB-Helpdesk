@@ -374,7 +374,7 @@ export default function AssetForm({
               <FieldSet>
                 <SectionLegend
                   icon={Package}
-                  tone="bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20"
+                  tone="bg-brand-50 text-brand-600 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20"
                   title="Asset basics"
                   description="Identity, ownership and where the asset lives."
                 />
@@ -508,7 +508,7 @@ export default function AssetForm({
                         {selectedUser ? (
                           <span className="flex min-w-0 items-center gap-2">
                             <Avatar className="size-6">
-                              <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 text-[10px] font-semibold text-white">
+                              <AvatarFallback className="bg-brand-500 text-[10px] font-semibold text-white">
                                 {emailInitials(selectedUser.email)}
                               </AvatarFallback>
                             </Avatar>
@@ -542,7 +542,7 @@ export default function AssetForm({
                               >
                                 <Check
                                   className={cn(
-                                    "size-4 text-indigo-600 dark:text-indigo-300",
+                                    "size-4 text-brand-600 dark:text-brand-300",
                                     selectedUser?.id === u.id
                                       ? "opacity-100"
                                       : "opacity-0"
@@ -628,7 +628,6 @@ export default function AssetForm({
             Cancel
           </Button>
           <Button
-            variant="gradient"
             onClick={handleSubmit}
             disabled={loading}
             className="flex-1 sm:flex-none"

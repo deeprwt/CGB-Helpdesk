@@ -27,7 +27,7 @@ type Tone = "indigo" | "emerald" | "sky" | "amber" | "red"
 
 const TONE_CHIP: Record<Tone, string> = {
   indigo:
-    "bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20",
+    "bg-brand-50 text-brand-600 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20",
   emerald:
     "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20",
   sky: "bg-sky-50 text-sky-600 ring-sky-100 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/20",
@@ -154,7 +154,7 @@ function VerifyEmailContent() {
           title="Email Verified!"
           description={message}
           action={
-            <Button asChild variant="gradient" className="w-full">
+            <Button asChild className="w-full">
               <Link href="/signin">Go to Sign In</Link>
             </Button>
           }
@@ -168,7 +168,7 @@ function VerifyEmailContent() {
           title="Already Verified"
           description={message}
           action={
-            <Button asChild variant="gradient" className="w-full">
+            <Button asChild className="w-full">
               <Link href="/signin">Go to Sign In</Link>
             </Button>
           }

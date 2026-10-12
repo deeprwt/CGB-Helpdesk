@@ -8,10 +8,10 @@ export type StatTone = "indigo" | "emerald" | "amber" | "violet" | "rose" | "sky
 
 const TONES: Record<StatTone, { chip: string; icon: string; bar: string; ring: string }> = {
   indigo: {
-    chip: "bg-indigo-50 ring-indigo-100 dark:bg-indigo-500/15 dark:ring-indigo-500/20",
-    icon: "text-indigo-600 dark:text-indigo-300",
-    bar: "bg-gradient-to-r from-indigo-400 to-indigo-600",
-    ring: "group-hover:ring-indigo-200/60 dark:group-hover:ring-indigo-500/30",
+    chip: "bg-brand-50 ring-brand-100 dark:bg-brand-500/15 dark:ring-brand-500/20",
+    icon: "text-brand-600 dark:text-brand-300",
+    bar: "bg-gradient-to-r from-brand-400 to-brand-600",
+    ring: "group-hover:ring-brand-200/60 dark:group-hover:ring-brand-500/30",
   },
   emerald: {
     chip: "bg-emerald-50 ring-emerald-100 dark:bg-emerald-500/15 dark:ring-emerald-500/20",
@@ -110,7 +110,7 @@ export function StatCard({
         "group relative flex h-full flex-col overflow-hidden rounded-2xl border bg-white p-5 text-left shadow-sm ring-1 ring-transparent transition-all duration-300 ease-out",
         "hover:-translate-y-0.5 hover:shadow-lg hover:shadow-gray-200/60 dark:bg-gray-900/40 dark:shadow-black/20",
         active
-          ? "border-indigo-300 ring-indigo-200 dark:border-indigo-500/40 dark:ring-indigo-500/20"
+          ? "border-brand-300 ring-brand-200 dark:border-brand-500/40 dark:ring-brand-500/20"
           : cn("border-gray-200/70 dark:border-white/10", t.ring),
         className
       )}
@@ -127,7 +127,7 @@ export function StatCard({
           {label}
         </p>
         {active && (
-          <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
             Active
           </span>
         )}

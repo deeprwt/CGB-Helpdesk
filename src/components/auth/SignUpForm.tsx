@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 
 const inputClass =
-  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-indigo-400 focus-visible:ring-indigo-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+  "h-12 rounded-lg border-gray-300 bg-gray-50 pl-10 text-gray-900 placeholder:text-gray-400 focus-visible:border-brand-400 focus-visible:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
 
 const leadingIconClass =
   "pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500"
@@ -89,7 +89,7 @@ export default function SignUpForm() {
 
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center pb-10">
         <div className="mb-8">
-          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-md shadow-indigo-500/25">
+          <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-500 text-white shadow-md shadow-brand-500/25">
             <UserPlus className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
@@ -227,7 +227,6 @@ export default function SignUpForm() {
 
             <Button
               type="submit"
-              variant="gradient"
               className="h-12 w-full font-semibold"
               disabled={loading}
             >
@@ -248,7 +247,7 @@ export default function SignUpForm() {
           <Button
             asChild
             variant="link"
-            className="h-auto p-0 font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+            className="h-auto p-0 font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
           >
             <Link href="/signin">Sign In</Link>
           </Button>

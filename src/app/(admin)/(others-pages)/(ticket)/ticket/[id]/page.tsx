@@ -559,7 +559,7 @@ export default function TicketDetailsPage() {
           <span className="font-medium text-gray-900 dark:text-white">{ticket.requester_name}</span>
         </>
       ),
-      dot: "bg-indigo-400",
+      dot: "bg-brand-400",
     },
     { label: `Created ${fmtDateTime(new Date(ticket.created_at))}`, dot: "bg-gray-400" },
   ];
@@ -608,7 +608,6 @@ export default function TicketDetailsPage() {
                 {/* Reopen — for closed or on-hold tickets */}
                 {(ticket.status === "closed" || ticket.status === "hold") && (
                   <Button
-                    variant="gradient"
                     size="sm"
                     onClick={handleReopen}
                     disabled={reopenLoading}
@@ -634,7 +633,7 @@ export default function TicketDetailsPage() {
                       <PauseCircle className="h-4 w-4" />
                       Hold Ticket
                     </Button>
-                    <Button variant="gradient" size="sm" onClick={() => setCloseOpen(true)}>
+                    <Button size="sm" onClick={() => setCloseOpen(true)}>
                       <CheckCircle2 className="h-4 w-4" />
                       Close Ticket
                     </Button>

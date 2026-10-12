@@ -67,7 +67,7 @@ type Tone = "indigo" | "emerald" | "amber" | "violet" | "sky" | "rose" | "gray";
 
 const TONE_CHIP: Record<Tone, string> = {
   indigo:
-    "bg-indigo-50 text-indigo-600 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20",
+    "bg-brand-50 text-brand-600 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20",
   emerald:
     "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20",
   amber:
@@ -80,7 +80,7 @@ const TONE_CHIP: Record<Tone, string> = {
 };
 
 const TONE_COMMENT: Record<Tone, string> = {
-  indigo: "border-indigo-100 bg-indigo-50/60 text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-200",
+  indigo: "border-brand-100 bg-brand-50/60 text-brand-700 dark:border-brand-500/20 dark:bg-brand-500/10 dark:text-brand-200",
   emerald: "border-emerald-100 bg-emerald-50/60 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200",
   amber: "border-amber-100 bg-amber-50/60 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200",
   violet: "border-violet-100 bg-violet-50/60 text-violet-700 dark:border-violet-500/20 dark:bg-violet-500/10 dark:text-violet-200",
@@ -128,7 +128,7 @@ export default function TicketActivityTrail({ items }: Props) {
     <Card className="gap-0 py-0">
       <CardHeader className="border-b border-gray-100 py-4 dark:border-white/10 [.border-b]:pb-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
             <History className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -226,7 +226,7 @@ export default function TicketActivityTrail({ items }: Props) {
                         </span>
                       ) : null}
                       {isProcessing && !item.date && !relative && (
-                        <span className="font-medium text-indigo-600 dark:text-indigo-300">
+                        <span className="font-medium text-brand-600 dark:text-brand-300">
                           In progress…
                         </span>
                       )}

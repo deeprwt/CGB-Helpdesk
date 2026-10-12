@@ -163,7 +163,7 @@ export default function OrganizationsPage() {
       header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
       cell: ({ row }) => (
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
             <Building2 className="h-4 w-4" />
           </span>
           <span className="font-semibold text-gray-900 dark:text-white">{row.original.name}</span>
@@ -266,7 +266,7 @@ export default function OrganizationsPage() {
           title="Organization Management"
           description="Manage whitelisted domains and organizations"
           actions={
-            <Button variant="gradient" onClick={() => setDialogOpen(true)}>
+            <Button onClick={() => setDialogOpen(true)}>
               <Plus className="h-4 w-4" />
               Add Organization
             </Button>

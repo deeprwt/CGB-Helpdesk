@@ -251,7 +251,7 @@ export default function TicketChat({
           <div className="relative shrink-0">
             <Avatar className="h-10 w-10">
               <AvatarImage src={otherUser.avatar_url ?? undefined} />
-              <AvatarFallback className="bg-gradient-to-br from-sky-500 to-indigo-500 text-sm font-semibold text-white">
+              <AvatarFallback className="bg-gradient-to-br from-sky-500 to-brand-500 text-sm font-semibold text-white">
                 {otherUser.name[0]?.toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -397,8 +397,8 @@ export default function TicketChat({
                               className={cn(
                                 "bg-gradient-to-br text-xs font-semibold text-white",
                                 isMine
-                                  ? "from-indigo-500 to-purple-500"
-                                  : "from-sky-500 to-indigo-500"
+                                  ? "from-brand-500 to-brand-600"
+                                  : "from-sky-500 to-brand-500"
                               )}
                             >
                               {profile.name[0]?.toUpperCase()}
@@ -424,7 +424,7 @@ export default function TicketChat({
                           className={cn(
                             "whitespace-pre-wrap break-words px-4 py-2.5 text-sm leading-relaxed shadow-sm",
                             isMine
-                              ? "rounded-2xl rounded-br-md bg-gradient-to-br from-indigo-500 to-purple-500 text-white"
+                              ? "rounded-2xl rounded-br-md bg-brand-500 text-white"
                               : "rounded-2xl rounded-bl-md bg-gray-100 text-gray-800 dark:bg-white/5 dark:text-gray-100"
                           )}
                         >
@@ -450,7 +450,7 @@ export default function TicketChat({
 
       {/* ── Input ──────────────────────── */}
       <CardFooter className="flex-col items-stretch gap-1.5 border-t border-gray-100 py-4 dark:border-white/10 [.border-t]:pt-4">
-        <div className="flex items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-2 transition-colors focus-within:border-indigo-300 focus-within:ring-[3px] focus-within:ring-indigo-500/10 dark:border-white/10 dark:bg-white/[0.03] dark:focus-within:border-indigo-500/40">
+        <div className="flex items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-2 transition-colors focus-within:border-brand-300 focus-within:ring-[3px] focus-within:ring-brand-500/10 dark:border-white/10 dark:bg-white/[0.03] dark:focus-within:border-brand-500/40">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -484,7 +484,6 @@ export default function TicketChat({
 
           <Button
             type="button"
-            variant="gradient"
             size="icon"
             onClick={handleSend}
             disabled={!text.trim()}

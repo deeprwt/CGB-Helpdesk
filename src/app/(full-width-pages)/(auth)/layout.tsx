@@ -37,10 +37,10 @@ export default function AuthLayout({
           {children}
 
           {/* Brand panel (lg+) */}
-          <div className="relative isolate hidden h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-700 lg:flex lg:w-1/2 dark:from-indigo-800 dark:via-indigo-900 dark:to-purple-900">
+          <div className="relative isolate hidden h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-brand-600 via-brand-700 to-brand-900 lg:flex lg:w-1/2 dark:from-brand-800 dark:via-brand-900 dark:to-brand-950">
             {/* Soft glow blobs */}
-            <div className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-purple-400/30 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-28 -left-20 h-80 w-80 rounded-full bg-indigo-400/30 blur-3xl" />
+            <div className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-blue-light-400/30 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-28 -left-20 h-80 w-80 rounded-full bg-brand-400/30 blur-3xl" />
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/10 blur-3xl" />
 
             {/* <!-- ===== Common Grid Shape Start ===== --> */}

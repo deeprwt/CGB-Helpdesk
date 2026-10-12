@@ -96,8 +96,8 @@ const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
           }}
           className={cn(
             "w-full rounded-xl border border-gray-200 bg-white text-sm text-gray-800 shadow-sm placeholder:text-gray-400 transition-colors",
-            "focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-500/10",
-            "dark:border-white/10 dark:bg-gray-900/60 dark:text-white dark:placeholder:text-gray-500 dark:focus:border-indigo-500/50",
+            "focus:border-brand-300 focus:outline-none focus:ring-4 focus:ring-brand-500/10",
+            "dark:border-white/10 dark:bg-gray-900/60 dark:text-white dark:placeholder:text-gray-500 dark:focus:border-brand-500/50",
             size === "sm" ? "h-9 pl-10 pr-14 py-2" : "h-11 pl-12 pr-16 py-2.5",
             className,
           )}
