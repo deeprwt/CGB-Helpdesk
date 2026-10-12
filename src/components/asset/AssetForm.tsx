@@ -216,7 +216,7 @@ export default function AssetForm({
         .single()
 
       if (error || !asset) {
-        toast.error("Failed to create asset")
+        toast.error(`Failed to create asset${error ? `: ${error.message}` : ""}`)
         setLoading(false)
         return
       }
@@ -239,7 +239,7 @@ export default function AssetForm({
         .eq("id", assetId)
 
       if (error) {
-        toast.error("Failed to update asset")
+        toast.error(`Failed to update asset: ${error.message}`)
         setLoading(false)
         return
       }
