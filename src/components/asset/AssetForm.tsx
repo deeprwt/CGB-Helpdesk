@@ -57,6 +57,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
+import { findAssetByCode } from "@/lib/asset-codes"
 
 /* ---------------- UI HELPERS ---------------- */
 
@@ -168,6 +169,7 @@ export default function AssetForm({
   // scrolls to the Assignment section and shows an inline error instead.
   const assignRef = React.useRef<HTMLDivElement>(null)
   const [assignError, setAssignError] = React.useState<string | null>(null)
+  const [codeError, setCodeError] = React.useState<string | null>(null)
 
   const [loading, setLoading] = React.useState(false)
 
@@ -275,6 +277,26 @@ export default function AssetForm({
     }
 
     setLoading(true)
+
+    // Asset codes must be unique (case-insensitive); on edit, ignore this asset itself
+    const code = form.asset_code.trim()
+    if (code) {
+      try {
+        const clash = await findAssetByCode(code, mode === "edit" ? assetId : undefined)
+        if (clash) {
+          const msg = `Asset code ${clash.asset_code} is already used by another asset`
+          setCodeError(msg)
+          toast.error(msg)
+          document.getElementById("asset-asset_code")?.scrollIntoView({ behavior: "smooth", block: "center" })
+          setLoading(false)
+          return
+        }
+      } catch (err) {
+        // If the check itself fails, don't block saving; log it for debugging
+        console.error("Asset code check failed:", err)
+      }
+    }
+
     let assetIdFinal = assetId
 
     const {
@@ -410,10 +432,13 @@ export default function AssetForm({
                         id={`asset-${key}`}
                         placeholder={placeholder}
                         value={form[key]}
-                        onChange={(e) =>
+                        aria-invalid={key === "asset_code" && !!codeError}
+                        onChange={(e) => {
                           setForm({ ...form, [key]: e.target.value })
-                        }
+                          if (key === "asset_code") setCodeError(null)
+                        }}
                       />
+                      {key === "asset_code" && <FieldError>{codeError}</FieldError>}
                     </Field>
                   ))}
 

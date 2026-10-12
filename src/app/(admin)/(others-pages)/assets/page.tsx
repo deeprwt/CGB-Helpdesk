@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabaseClient"
 import {
   getUserAccessibleDomains,
   buildEmailDomainFilter,
-  extractOrgDomain,
   type Organization,
 } from "@/lib/org"
 import { useRouter } from "next/navigation"
@@ -30,8 +29,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import {
-  Field,
-  FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
@@ -68,10 +65,8 @@ import {
   Archive,
   Boxes,
   CircleCheck,
-  CloudUpload,
   Download,
   Eye,
-  FileSpreadsheet,
   MapPin,
   PackageOpen,
   Pencil,
@@ -79,11 +74,11 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Trash2,
-  Upload,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
 import RoleGate from "@/components/auth/RoleGate"
+import { AssetImportDialog } from "@/components/asset/AssetImportDialog"
 import { useCurrentUser } from "@/hooks/useCurrentUser"
 import {
   FilterPanel,
@@ -307,12 +302,10 @@ export default function AssetsPage() {
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
-  const [importOpen, setImportOpen] = React.useState(false)
   const [exportOpen, setExportOpen] = React.useState(false)
   const [exportMode, setExportMode] =
     React.useState<"all" | "selected">("all")
 
-  const [file, setFile] = React.useState<File | null>(null)
 
   /* ---------------- LOAD ASSETS ---------------- */
   const loadAssets = async () => {
@@ -686,115 +679,6 @@ export default function AssetsPage() {
     setExportOpen(false)
   }
 
-  /* ---------------- DOWNLOAD IMPORT TEMPLATE ---------------- */
-  const handleDownloadTemplate = () => {
-    const templateData = [
-      {
-        organization_domain: "cgbindia.com",
-        asset_code: "CGB-001",
-        asset_type: "Laptop",
-        model: "Dell Latitude 5520",
-        status: "in_use",
-        location: "Delhi Office",
-        department: "IT",
-        purchase_date: "2025-01-15",
-        warranty_expiry: "2027-01-15",
-        serial_no: "SN12345678",
-        cpu: "Intel i7-1165G7",
-        ram: "16GB",
-        storage: "512GB SSD",
-        os_name: "Windows 11 Pro",
-        mac_address: "AA:BB:CC:DD:EE:FF",
-        vendor: "Dell Technologies",
-        assigned_user_email: "user@company.com",
-      },
-    ]
-
-    const ws = XLSX.utils.json_to_sheet(templateData)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Assets")
-    XLSX.writeFile(wb, "asset-import-template.xlsx")
-    toast.success("Template downloaded")
-  }
-
-  /* ---------------- IMPORT (ALL FIELDS) ---------------- */
-  const handleImport = async () => {
-    if (!file) return
-
-    const buffer = await file.arrayBuffer()
-    const workbook = XLSX.read(buffer)
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet)
-
-    for (const r of rows) {
-      // Organization: explicit column, else the assigned user's email domain
-      const orgDomain = norm(
-        r.organization_domain ||
-        (r.assigned_user_email ? extractOrgDomain(r.assigned_user_email) : "")
-      )
-      const org = orgs.find((o) => o.domain === orgDomain)
-
-      const { data: asset } = await supabase
-        .from("assets")
-        .insert({
-          ...(org ? { organization_id: org.id } : {}),
-          asset_code: r.asset_code,
-          asset_type: r.asset_type,
-          model: r.model ?? "",
-          status: r.status ?? "in_use",
-          location: r.location ?? null,
-          department: r.department ?? "",
-          purchase_date: r.purchase_date || null,
-          warranty_expiry: r.warranty_expiry || null,
-        })
-        .select()
-        .single()
-
-      if (!asset) continue
-
-      const detailRows = Object.entries({
-        serial_no: r.serial_no,
-        cpu: r.cpu,
-        ram: r.ram,
-        storage: r.storage,
-        os_name: r.os_name,
-        mac_address: r.mac_address,
-        vendor: r.vendor,
-      })
-        .filter(([, v]) => v)
-        .map(([key, value]) => ({
-          asset_id: asset.id,
-          key,
-          value,
-        }))
-
-      if (detailRows.length) {
-        await supabase.from("asset_details").insert(detailRows)
-      }
-
-      if (r.assigned_user_email) {
-        const { data: user } = await supabase
-          .from("users")
-          .select("id")
-          .eq("email", r.assigned_user_email)
-          .single()
-
-        if (user) {
-          await supabase.from("asset_assignments").insert({
-            asset_id: asset.id,
-            user_id: user.id,
-          })
-        }
-      }
-    }
-
-    toast.success("Assets imported successfully")
-    setImportOpen(false)
-    setFile(null)
-    loadAssets()
-  }
-
-
   /* ---------------- SUMMARY (derived from loaded rows) ---------------- */
   const stats = React.useMemo(() => {
     const count = (fn: (r: AssetRow) => boolean) => assets.filter(fn).length
@@ -833,12 +717,6 @@ export default function AssetsPage() {
     [selected]
   )
 
-  const importInputRef = React.useRef<HTMLInputElement>(null)
-
-  const clearImportFile = () => {
-    setFile(null)
-    if (importInputRef.current) importInputRef.current.value = ""
-  }
 
   const deleteTarget = deleteId ? assets.find((a) => a.id === deleteId) : null
 
@@ -1146,111 +1024,7 @@ export default function AssetsPage() {
           actions={
             <>
               {/* IMPORT */}
-              <Dialog open={importOpen} onOpenChange={setImportOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">
-                    <Upload className="size-4" />
-                    Import
-                  </Button>
-                </DialogTrigger>
-
-                <DialogContent className="sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Import Assets</DialogTitle>
-                    <DialogDescription>
-                      Download the template to see the required format, fill in your data, then upload.
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <FieldGroup className="gap-4">
-                    <Field>
-                      <FieldLabel>1. Get the template</FieldLabel>
-                      <div className="flex items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-white/10">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20">
-                          <FileSpreadsheet className="size-4" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                            asset-import-template.xlsx
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Every supported column, with a sample row
-                          </p>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleDownloadTemplate}
-                        >
-                          <Download className="size-4" />
-                          Template
-                        </Button>
-                      </div>
-                    </Field>
-
-                    <Field>
-                      <FieldLabel htmlFor="asset-import-file">
-                        2. Upload your file
-                      </FieldLabel>
-                      <input
-                        ref={importInputRef}
-                        id="asset-import-file"
-                        type="file"
-                        accept=".xlsx,.csv"
-                        className="hidden"
-                        onChange={(e) =>
-                          setFile(e.target.files?.[0] ?? null)
-                        }
-                      />
-                      <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/60 px-4 py-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
-                        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/15 dark:text-brand-300 dark:ring-brand-500/20">
-                          <CloudUpload className="size-5" />
-                        </span>
-                        {file ? (
-                          <div className="flex max-w-full items-center gap-1">
-                            <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                              {file.name}
-                            </p>
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              onClick={clearImportFile}
-                              aria-label="Remove file"
-                              className="size-6 text-gray-500 hover:text-red-600 dark:text-gray-400"
-                            >
-                              <X className="size-3.5" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-600 dark:text-gray-300">
-                            Excel (.xlsx) or CSV file
-                          </p>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => importInputRef.current?.click()}
-                        >
-                          {file ? "Choose another file" : "Choose file"}
-                        </Button>
-                      </div>
-                    </Field>
-                  </FieldGroup>
-
-                  <DialogFooter>
-                    <DialogClose asChild>
-                      <Button variant="outline">Cancel</Button>
-                    </DialogClose>
-                    <Button
-                      disabled={!file}
-                      onClick={handleImport}
-                    >
-                      <Upload className="size-4" />
-                      Upload
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <AssetImportDialog orgs={orgs} onImported={loadAssets} />
 
               {/* EXPORT */}
               <Dialog open={exportOpen} onOpenChange={setExportOpen}>
