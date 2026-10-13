@@ -108,7 +108,7 @@ export default function SignInForm() {
     setError(null)
     setNeedsVerification(false)
 
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
@@ -122,24 +122,6 @@ export default function SignInForm() {
       }
       setLoading(false)
       return
-    }
-
-    // Check if user is verified
-    if (signInData.user) {
-      const { data: userData } = await supabase
-        .from("users")
-        .select("is_verified")
-        .eq("id", signInData.user.id)
-        .single()
-
-      if (userData && userData.is_verified === false) {
-        // Sign out immediately — unverified users cannot access the app
-        await supabase.auth.signOut()
-        setNeedsVerification(true)
-        setError(null)
-        setLoading(false)
-        return
-      }
     }
 
     setLoading(false)

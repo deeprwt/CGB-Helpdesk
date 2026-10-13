@@ -167,8 +167,8 @@ export default function EngineerTicketTable() {
 
       /* Send email notification */
       const [requesterRes, engineerRes, ticketRes] = await Promise.all([
-        supabase.from("users").select("email, name").eq("id", requesterId).single(),
-        supabase.from("users").select("name").eq("id", user.id).single(),
+        supabase.from("users").select("email, name:full_name").eq("id", requesterId).single(),
+        supabase.from("users").select("name:full_name").eq("id", user.id).single(),
         supabase.from("tickets").select("subject").eq("id", ticketId).single(),
       ])
 

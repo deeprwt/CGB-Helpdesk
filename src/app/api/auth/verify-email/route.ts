@@ -27,12 +27,10 @@ export async function GET(req: Request) {
       { auth: { persistSession: false } }
     )
 
-    /* 1. Find user by ID */
-    const { data: user, error: userError } = await supabaseAdmin
-      .from("users")
-      .select("id, verification_token, token_expiry, is_verified")
-      .eq("id", uid)
-      .single()
+    /* 1. Find the auth user — verification state lives in Supabase Auth */
+    const { data: authData, error: userError } =
+      await supabaseAdmin.auth.admin.getUserById(uid)
+    const user = authData?.user
 
     if (userError || !user) {
       return NextResponse.json(
@@ -42,9 +40,7 @@ export async function GET(req: Request) {
     }
 
     /* 2. Already verified */
-    if (user.is_verified) {
-      // Self-heal accounts verified before Auth confirmation was added
-      await supabaseAdmin.auth.admin.updateUserById(uid, { email_confirm: true })
+    if (user.email_confirmed_at) {
       return NextResponse.json({
         success: true,
         message: "Email already verified. You can log in.",
@@ -52,8 +48,13 @@ export async function GET(req: Request) {
       })
     }
 
+    const { verification_token, token_expiry } = (user.app_metadata ?? {}) as {
+      verification_token?: string
+      token_expiry?: string
+    }
+
     /* 3. Check token exists */
-    if (!user.verification_token) {
+    if (!verification_token) {
       return NextResponse.json(
         { error: "No pending verification. Please request a new link." },
         { status: 400 }
@@ -61,7 +62,7 @@ export async function GET(req: Request) {
     }
 
     /* 4. Check token expiry */
-    if (user.token_expiry && new Date(user.token_expiry) < new Date()) {
+    if (token_expiry && new Date(token_expiry) < new Date()) {
       return NextResponse.json(
         { error: "Verification link has expired. Please request a new one from the login page." },
         { status: 410 }
@@ -69,39 +70,22 @@ export async function GET(req: Request) {
     }
 
     /* 5. Validate hashed token */
-    const hashedToken = hashToken(token)
-    if (hashedToken !== user.verification_token) {
+    if (hashToken(token) !== verification_token) {
       return NextResponse.json(
         { error: "Invalid verification link" },
         { status: 400 }
       )
     }
 
-    /* 6. Mark as verified + clear token (single-use) */
-    const { error: updateError } = await supabaseAdmin
-      .from("users")
-      .update({
-        is_verified: true,
-        verification_token: null,
-        token_expiry: null,
+    /* 6. Confirm the email (unblocks sign-in) + clear token (single-use) */
+    const { error: updateError } =
+      await supabaseAdmin.auth.admin.updateUserById(uid, {
+        email_confirm: true,
+        app_metadata: { verification_token: null, token_expiry: null },
       })
-      .eq("id", uid)
 
     if (updateError) {
       console.error("Verification update failed:", updateError)
-      return NextResponse.json(
-        { error: "Failed to verify email" },
-        { status: 500 }
-      )
-    }
-
-    /* 7. Confirm the email in Supabase Auth — sign-in is blocked
-          with "Email not confirmed" until this is set */
-    const { error: confirmError } =
-      await supabaseAdmin.auth.admin.updateUserById(uid, { email_confirm: true })
-
-    if (confirmError) {
-      console.error("Auth email confirmation failed:", confirmError)
       return NextResponse.json(
         { error: "Failed to verify email" },
         { status: 500 }

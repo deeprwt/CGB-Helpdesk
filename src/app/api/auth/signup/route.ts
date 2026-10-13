@@ -69,7 +69,12 @@ export async function POST(req: Request) {
       )
     }
 
-    /* 3. Create auth user via admin API */
+    /* 3. Generate verification token (only the hash is stored) */
+    const rawToken = randomBytes(32).toString("hex")
+    const tokenExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min
+
+    /* 4. Create auth user — unconfirmed until the emailed link is opened.
+          The token lives in app_metadata, which only the service role can write. */
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -78,6 +83,10 @@ export async function POST(req: Request) {
         user_metadata: {
           first_name,
           last_name,
+        },
+        app_metadata: {
+          verification_token: hashToken(rawToken),
+          token_expiry: tokenExpiry,
         },
       })
 
@@ -89,33 +98,7 @@ export async function POST(req: Request) {
       )
     }
 
-    /* 4. Generate verification token */
-    const rawToken = randomBytes(32).toString("hex")
-    const hashedToken = hashToken(rawToken)
-    const tokenExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 min
-
-    /* 5. Store hashed token in users table */
-    const { error: tokenError } = await supabaseAdmin
-      .from("users")
-      .update({
-        verification_token: hashedToken,
-        token_expiry: tokenExpiry,
-        is_verified: false,
-      })
-      .eq("id", authData.user.id)
-
-    // Without a stored token the emailed link can never work — roll back
-    // so the user can sign up again (e.g. migration_email_verification.sql not run)
-    if (tokenError) {
-      console.error("Storing verification token failed:", tokenError)
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id)
-      return NextResponse.json(
-        { error: "Sign up is temporarily unavailable. Please contact the administrator." },
-        { status: 500 }
-      )
-    }
-
-    /* 6. Send verification email — awaited, because Vercel can stop the
+    /* 5. Send verification email — awaited, because Vercel can stop the
           function as soon as the response is returned */
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
     const verificationUrl = `${appUrl}/verify-email?token=${rawToken}&uid=${authData.user.id}`

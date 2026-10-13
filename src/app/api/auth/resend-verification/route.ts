@@ -27,14 +27,19 @@ export async function POST(req: Request) {
       { auth: { persistSession: false } }
     )
 
-    /* 1. Find user */
-    const { data: user, error: userError } = await supabaseAdmin
+    /* 1. Find user (profile row → auth user, which holds verification state) */
+    const { data: profile } = await supabaseAdmin
       .from("users")
-      .select("id, full_name, is_verified")
+      .select("id, full_name")
       .eq("email", email.toLowerCase())
-      .single()
+      .maybeSingle()
 
-    if (userError || !user) {
+    const { data: authData } = profile
+      ? await supabaseAdmin.auth.admin.getUserById(profile.id)
+      : { data: null }
+    const user = authData?.user
+
+    if (!profile || !user) {
       // Don't reveal if user exists or not
       return NextResponse.json({
         success: true,
@@ -43,9 +48,7 @@ export async function POST(req: Request) {
     }
 
     /* 2. Already verified */
-    if (user.is_verified) {
-      // Self-heal accounts verified before Auth confirmation was added
-      await supabaseAdmin.auth.admin.updateUserById(user.id, { email_confirm: true })
+    if (user.email_confirmed_at) {
       return NextResponse.json({
         success: true,
         message: "Your email is already verified. You can log in.",
@@ -58,14 +61,19 @@ export async function POST(req: Request) {
     const hashedToken = hashToken(rawToken)
     const tokenExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
-    /* 4. Update user with new token */
-    await supabaseAdmin
-      .from("users")
-      .update({
-        verification_token: hashedToken,
-        token_expiry: tokenExpiry,
-      })
-      .eq("id", user.id)
+    /* 4. Store the new token on the auth user (replaces any previous one) */
+    const { error: tokenError } = await supabaseAdmin.auth.admin.updateUserById(
+      user.id,
+      { app_metadata: { verification_token: hashedToken, token_expiry: tokenExpiry } }
+    )
+
+    if (tokenError) {
+      console.error("Storing verification token failed:", tokenError)
+      return NextResponse.json(
+        { error: "Could not send verification email. Please try again." },
+        { status: 500 }
+      )
+    }
 
     /* 5. Send verification email (awaited so Vercel doesn't drop it) */
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
@@ -73,7 +81,7 @@ export async function POST(req: Request) {
 
     await sendVerificationEmail({
       to: email,
-      recipientName: user.full_name || "User",
+      recipientName: profile.full_name || "User",
       verificationUrl,
     }).catch((err) => {
       console.error("Resend verification email failed:", err)

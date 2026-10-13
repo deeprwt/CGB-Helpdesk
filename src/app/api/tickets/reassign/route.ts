@@ -89,9 +89,9 @@ export async function POST(req: Request) {
     /* 5. Log activity */
     const [prevEngineerRes, newEngineerRes] = await Promise.all([
       previousAssignee
-        ? supabaseAdmin.from("users").select("name").eq("id", previousAssignee).single()
+        ? supabaseAdmin.from("users").select("name:full_name").eq("id", previousAssignee).single()
         : Promise.resolve({ data: null }),
-      supabaseAdmin.from("users").select("name, email").eq("id", new_engineer_id).single(),
+      supabaseAdmin.from("users").select("name:full_name, email").eq("id", new_engineer_id).single(),
     ])
 
     await supabaseAdmin.from("ticket_activity").insert({
@@ -113,13 +113,13 @@ export async function POST(req: Request) {
 
     const { data: requester } = await supabaseAdmin
       .from("users")
-      .select("name, email")
+      .select("name:full_name, email")
       .eq("id", ticket.requester_id)
       .single()
 
     /* 7. Email requester about reassignment */
     if (requester?.email) {
-      sendTicketEmail({
+      await sendTicketEmail({
         to: requester.email,
         recipientName: requester.name ?? "User",
         actorName: newEngineerName,
@@ -127,12 +127,12 @@ export async function POST(req: Request) {
         ticketSubject: ticket.subject,
         action: "reassigned",
         comment: `Your ticket has been reassigned from ${prevEngineerName} to ${newEngineerName}.`,
-      }).catch(() => {})
+      }).catch((err) => console.error("Ticket email failed:", err))
     }
 
     /* 8. Email new engineer */
     if (newEngineerRes.data?.email) {
-      sendTicketEmail({
+      await sendTicketEmail({
         to: newEngineerRes.data.email,
         recipientName: newEngineerName,
         actorName: "Admin",
@@ -140,7 +140,7 @@ export async function POST(req: Request) {
         ticketSubject: ticket.subject,
         action: "acquired",
         comment: `Ticket #${ticketShortId} has been assigned to you.`,
-      }).catch(() => {})
+      }).catch((err) => console.error("Ticket email failed:", err))
     }
 
     /* 9. Email previous engineer about unassignment */
@@ -152,7 +152,7 @@ export async function POST(req: Request) {
         .single()
 
       if (prevEngineerEmail?.email) {
-        sendTicketEmail({
+        await sendTicketEmail({
           to: prevEngineerEmail.email,
           recipientName: prevEngineerName,
           actorName: "Admin",
@@ -160,7 +160,7 @@ export async function POST(req: Request) {
           ticketSubject: ticket.subject,
           action: "reassigned",
           comment: `Ticket #${ticketShortId} has been reassigned from you to ${newEngineerName}.`,
-        }).catch(() => {})
+        }).catch((err) => console.error("Ticket email failed:", err))
       }
     }
 

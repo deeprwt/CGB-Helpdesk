@@ -124,20 +124,20 @@ export async function POST(req: Request) {
 
     // Email confirmation to requester
     if (requesterData?.email) {
-      sendTicketEmail({
+      await sendTicketEmail({
         to: requesterData.email,
         recipientName: requesterName,
         actorName: requesterName,
         ticketId: ticket.id,
         ticketSubject,
         action: "created",
-      }).catch(() => {})
+      }).catch((err) => console.error("Ticket email failed:", err))
     }
 
     // Notify all admins
     const { data: admins } = await supabaseAdmin
       .from("users")
-      .select("id, name, email")
+      .select("id, name:full_name, email")
       .in("role", ["admin", "superadmin"])
 
     for (const admin of admins ?? []) {
@@ -155,14 +155,14 @@ export async function POST(req: Request) {
 
       // Email to admin
       if (admin.email) {
-        sendTicketEmail({
+        await sendTicketEmail({
           to: admin.email,
           recipientName: admin.name ?? "Admin",
           actorName: requesterName,
           ticketId: ticket.id,
           ticketSubject,
           action: "created",
-        }).catch(() => {})
+        }).catch((err) => console.error("Ticket email failed:", err))
       }
     }
 

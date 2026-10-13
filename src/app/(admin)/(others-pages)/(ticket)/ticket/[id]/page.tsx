@@ -312,7 +312,7 @@ export default function TicketDetailsPage() {
       const engineerIds = [...new Set(assignmentRecords.map((a: AssignmentRecord) => a.engineer_id))];
       const { data: engineerNames } = await supabase
         .from("users")
-        .select("id, name")
+        .select("id, name:full_name")
         .in("id", engineerIds);
 
       const nameMap = new Map((engineerNames ?? []).map((e: { id: string; name: string }) => [e.id, e.name]));
@@ -332,7 +332,7 @@ export default function TicketDetailsPage() {
       const actorIds = [...new Set(activityRecords.map((a: ActivityRecord) => a.actor_id))];
       const { data: actorNames } = await supabase
         .from("users")
-        .select("id, name")
+        .select("id, name:full_name")
         .in("id", actorIds);
 
       const nameMap = new Map((actorNames ?? []).map((e: { id: string; name: string }) => [e.id, e.name]));
@@ -349,7 +349,7 @@ export default function TicketDetailsPage() {
     /* Fetch requester email & current user's name */
     const [requesterInfo, engineerInfo] = await Promise.all([
       supabase.from("users").select("email").eq("id", ticketData.requester_id).single(),
-      supabase.from("users").select("name").eq("id", user.id).single(),
+      supabase.from("users").select("name:full_name").eq("id", user.id).single(),
     ]);
     if (requesterInfo.data?.email) setRequesterEmail(requesterInfo.data.email);
     if (engineerInfo.data?.name) setEngineerName(engineerInfo.data.name);
@@ -365,7 +365,7 @@ export default function TicketDetailsPage() {
   const loadEngineers = async () => {
     const { data } = await supabase
       .from("users")
-      .select("id, name, email")
+      .select("id, name:full_name, email")
       .in("role", ["engineer", "admin"]);
 
     setEngineers(
@@ -748,7 +748,7 @@ export default function TicketDetailsPage() {
           /* Notify admins */
           const { data: admins } = await supabase
             .from("users")
-            .select("id, email, name")
+            .select("id, email, name:full_name")
             .in("role", ["admin", "superadmin"]);
 
           for (const admin of admins ?? []) {
@@ -835,7 +835,7 @@ export default function TicketDetailsPage() {
           /* Also notify admins about hold */
           const { data: admins } = await supabase
             .from("users")
-            .select("id, email, name")
+            .select("id, email, name:full_name")
             .in("role", ["admin", "superadmin"]);
 
           for (const admin of admins ?? []) {

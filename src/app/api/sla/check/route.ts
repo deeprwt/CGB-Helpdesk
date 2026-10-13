@@ -52,7 +52,7 @@ export async function GET(req: Request) {
       /* Get all admin users */
       const { data: admins } = await supabase
         .from("users")
-        .select("id, name, email")
+        .select("id, name:full_name, email")
         .in("role", ["admin", "superadmin"])
 
       for (const ticket of almostBreached) {
@@ -65,7 +65,7 @@ export async function GET(req: Request) {
         // Get requester email
         const { data: requester } = await supabase
           .from("users")
-          .select("email, name")
+          .select("email, name:full_name")
           .eq("id", ticket.requester_id)
           .single()
 
@@ -111,7 +111,7 @@ export async function GET(req: Request) {
     if (responseBreached && responseBreached.length > 0) {
       const { data: admins } = await supabase
         .from("users")
-        .select("id, name, email")
+        .select("id, name:full_name, email")
         .in("role", ["admin", "superadmin"])
 
       for (const ticket of responseBreached) {
@@ -167,7 +167,7 @@ export async function GET(req: Request) {
     if (resolutionBreached && resolutionBreached.length > 0) {
       const { data: admins } = await supabase
         .from("users")
-        .select("id, name, email")
+        .select("id, name:full_name, email")
         .in("role", ["admin", "superadmin"])
 
       for (const ticket of resolutionBreached) {
@@ -190,7 +190,7 @@ export async function GET(req: Request) {
         if (ticket.assignee) {
           const { data: engineer } = await supabase
             .from("users")
-            .select("id, name, email")
+            .select("id, name:full_name, email")
             .eq("id", ticket.assignee)
             .single()
           if (engineer) notifyUsers.push(engineer)

@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     // Prevent deleting other admins/superadmins
     const { data: targetUser } = await supabaseAdmin
       .from("users")
-      .select("role, name")
+      .select("role, name:full_name")
       .eq("id", target_user_id)
       .single()
 

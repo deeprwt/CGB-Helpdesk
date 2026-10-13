@@ -103,7 +103,7 @@ export async function POST(req: Request) {
     /* 3. Log activity */
     const { data: engineerData } = await supabaseAdmin
       .from("users")
-      .select("name")
+      .select("name:full_name")
       .eq("id", user.id)
       .single()
 
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
 
     const { data: requester } = await supabaseAdmin
       .from("users")
-      .select("name, email")
+      .select("name:full_name, email")
       .eq("id", ticket.requester_id)
       .single()
 
@@ -141,20 +141,20 @@ export async function POST(req: Request) {
 
     // Email to requester
     if (requester?.email) {
-      sendTicketEmail({
+      await sendTicketEmail({
         to: requester.email,
         recipientName: requester.name ?? "User",
         actorName,
         ticketId: ticket_id,
         ticketSubject: ticket.subject,
         action: "reopened",
-      }).catch(() => {})
+      }).catch((err) => console.error("Ticket email failed:", err))
     }
 
     /* 5. Notify admins */
     const { data: admins } = await supabaseAdmin
       .from("users")
-      .select("id, name, email")
+      .select("id, name:full_name, email")
       .in("role", ["admin", "superadmin"])
 
     for (const admin of admins ?? []) {
@@ -170,14 +170,14 @@ export async function POST(req: Request) {
       })
 
       if (admin.email) {
-        sendTicketEmail({
+        await sendTicketEmail({
           to: admin.email,
           recipientName: admin.name ?? "Admin",
           actorName,
           ticketId: ticket_id,
           ticketSubject: ticket.subject,
           action: "reopened",
-        }).catch(() => {})
+        }).catch((err) => console.error("Ticket email failed:", err))
       }
     }
 

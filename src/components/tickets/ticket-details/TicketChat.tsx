@@ -197,7 +197,7 @@ export default function TicketChat({
       /* Also send email when user is offline */
       const { data: recipientData } = await supabase
         .from("users")
-        .select("email, name")
+        .select("email, name:full_name")
         .eq("id", otherUser.id)
         .single()
 
