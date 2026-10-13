@@ -43,6 +43,8 @@ export async function GET(req: Request) {
 
     /* 2. Already verified */
     if (user.is_verified) {
+      // Self-heal accounts verified before Auth confirmation was added
+      await supabaseAdmin.auth.admin.updateUserById(uid, { email_confirm: true })
       return NextResponse.json({
         success: true,
         message: "Email already verified. You can log in.",
@@ -87,6 +89,19 @@ export async function GET(req: Request) {
 
     if (updateError) {
       console.error("Verification update failed:", updateError)
+      return NextResponse.json(
+        { error: "Failed to verify email" },
+        { status: 500 }
+      )
+    }
+
+    /* 7. Confirm the email in Supabase Auth — sign-in is blocked
+          with "Email not confirmed" until this is set */
+    const { error: confirmError } =
+      await supabaseAdmin.auth.admin.updateUserById(uid, { email_confirm: true })
+
+    if (confirmError) {
+      console.error("Auth email confirmation failed:", confirmError)
       return NextResponse.json(
         { error: "Failed to verify email" },
         { status: 500 }

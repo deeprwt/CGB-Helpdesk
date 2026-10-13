@@ -44,6 +44,8 @@ export async function POST(req: Request) {
 
     /* 2. Already verified */
     if (user.is_verified) {
+      // Self-heal accounts verified before Auth confirmation was added
+      await supabaseAdmin.auth.admin.updateUserById(user.id, { email_confirm: true })
       return NextResponse.json({
         success: true,
         message: "Your email is already verified. You can log in.",
@@ -65,11 +67,11 @@ export async function POST(req: Request) {
       })
       .eq("id", user.id)
 
-    /* 5. Send verification email */
+    /* 5. Send verification email (awaited so Vercel doesn't drop it) */
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
     const verificationUrl = `${appUrl}/verify-email?token=${rawToken}&uid=${user.id}`
 
-    sendVerificationEmail({
+    await sendVerificationEmail({
       to: email,
       recipientName: user.full_name || "User",
       verificationUrl,

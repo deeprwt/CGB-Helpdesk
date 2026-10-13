@@ -114,7 +114,12 @@ export default function SignInForm() {
     })
 
     if (signInError) {
-      setError(signInError.message)
+      // Unconfirmed email → show the resend banner instead of the raw error
+      if (signInError.code === "email_not_confirmed") {
+        setNeedsVerification(true)
+      } else {
+        setError(signInError.message)
+      }
       setLoading(false)
       return
     }
