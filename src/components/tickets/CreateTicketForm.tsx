@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -112,6 +113,7 @@ type Role = "user" | "engineer" | "admin"
 type UserLite = {
   id: string
   full_name: string
+  email: string
   phone: number | null
   role: Role
 }
@@ -126,6 +128,7 @@ type AssignedAsset = {
 }
 
 export default function CreateTicketForm() {
+  const router = useRouter()
   const formRef = React.useRef<HTMLFormElement | null>(null)
 
   const [loading, setLoading] = React.useState(false)
@@ -158,7 +161,7 @@ export default function CreateTicketForm() {
 
       const { data: me } = await supabase
         .from("users")
-        .select("id, full_name, phone, role")
+        .select("id, full_name, email, phone, role")
         .eq("id", auth.user.id)
         .single()
 
@@ -172,7 +175,7 @@ export default function CreateTicketForm() {
       if (me.role !== "user") {
         const { data } = await supabase
           .from("users")
-          .select("id, full_name, phone, role")
+          .select("id, full_name, email, phone, role")
           .order("full_name")
 
         setUsers(data ?? [])
@@ -240,15 +243,14 @@ export default function CreateTicketForm() {
         body: formData,
       })
 
-      if (!res.ok) throw new Error("Failed")
+      const result = await res.json().catch(() => null)
+      if (!res.ok || !result?.ticketId) throw new Error(result?.error ?? "Failed")
 
       toast.success("Ticket created successfully")
-      formRef.current.reset()
-      setCategory("")
-      setAssetRelated("no")
+      // Button stays disabled while navigating, so it can't be submitted twice
+      router.push(`/ticket/${result.ticketId}`)
     } catch {
       toast.error("Failed to create ticket")
-    } finally {
       setLoading(false)
     }
   }
@@ -316,6 +318,11 @@ export default function CreateTicketForm() {
                           )}
                           <span className="truncate">
                             {selectedUser?.full_name ?? "Select user"}
+                            {selectedUser?.email && (
+                              <span className="ml-1.5 text-muted-foreground">
+                                · {selectedUser.email}
+                              </span>
+                            )}
                           </span>
                         </span>
                         <ChevronsUpDown className="opacity-50" />
@@ -333,6 +340,10 @@ export default function CreateTicketForm() {
                             {users.map((u) => (
                               <CommandItem
                                 key={u.id}
+                                // Unique per user — the default (display text) mixes up
+                                // people with the same name; keywords keep search working
+                                value={u.id}
+                                keywords={[u.full_name ?? "", u.email ?? ""]}
                                 onSelect={() => {
                                   setSelectedUser(u)
                                   setRequesterName(u.full_name)
@@ -345,7 +356,12 @@ export default function CreateTicketForm() {
                                     selectedUser?.id === u.id ? "opacity-100" : "opacity-0"
                                   )}
                                 />
-                                {u.full_name}
+                                <span className="flex min-w-0 flex-col">
+                                  <span className="truncate">{u.full_name}</span>
+                                  <span className="truncate text-xs text-muted-foreground">
+                                    {u.email}
+                                  </span>
+                                </span>
                               </CommandItem>
                             ))}
                           </CommandGroup>

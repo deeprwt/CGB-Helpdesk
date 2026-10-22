@@ -44,7 +44,7 @@ import TicketActivityTrail, {
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
 import { sendNotification, sendEmailNotification } from "@/lib/notify";
 import { logActivity } from "@/lib/activity";
-import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org";
+import { getUserAccessibleDomains, getOrgUserIdsByDomains, getTicketAdmins } from "@/lib/org";
 import { toast } from "sonner";
 
 /* -----------------------------------
@@ -351,8 +351,10 @@ export default function TicketDetailsPage() {
       supabase.from("users").select("email").eq("id", ticketData.requester_id).single(),
       supabase.from("users").select("name:full_name").eq("id", user.id).single(),
     ]);
-    if (requesterInfo.data?.email) setRequesterEmail(requesterInfo.data.email);
-    if (engineerInfo.data?.name) setEngineerName(engineerInfo.data.name);
+    // Always overwrite: keeping the previous value would send this ticket's
+    // close/hold emails to the requester of the last ticket viewed
+    setRequesterEmail(requesterInfo.data?.email ?? null);
+    setEngineerName(engineerInfo.data?.name ?? "Support Engineer");
 
     setLoading(false);
   }, [id, router]);
@@ -745,13 +747,10 @@ export default function TicketDetailsPage() {
             });
           }
 
-          /* Notify admins */
-          const { data: admins } = await supabase
-            .from("users")
-            .select("id, email, name:full_name")
-            .in("role", ["admin", "superadmin"]);
+          /* Notify the admins responsible for the requester's organization */
+          const admins = await getTicketAdmins(supabase, requesterEmail);
 
-          for (const admin of admins ?? []) {
+          for (const admin of admins) {
             if (admin.id === userId) continue;
 
             sendNotification({
@@ -832,13 +831,10 @@ export default function TicketDetailsPage() {
             });
           }
 
-          /* Also notify admins about hold */
-          const { data: admins } = await supabase
-            .from("users")
-            .select("id, email, name:full_name")
-            .in("role", ["admin", "superadmin"]);
+          /* Also notify the requester's organization admins about hold */
+          const admins = await getTicketAdmins(supabase, requesterEmail);
 
-          for (const admin of admins ?? []) {
+          for (const admin of admins) {
             if (admin.id !== userId) {
               sendNotification({
                 user_id: admin.id,

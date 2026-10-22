@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { sendTicketEmail } from "@/lib/email"
+import { getTicketAdmins } from "@/lib/org"
 
 export const runtime = "nodejs"
 
@@ -151,13 +152,10 @@ export async function POST(req: Request) {
       }).catch((err) => console.error("Ticket email failed:", err))
     }
 
-    /* 5. Notify admins */
-    const { data: admins } = await supabaseAdmin
-      .from("users")
-      .select("id, name:full_name, email")
-      .in("role", ["admin", "superadmin"])
+    /* 5. Notify the admins responsible for the requester's organization */
+    const admins = await getTicketAdmins(supabaseAdmin, requester?.email)
 
-    for (const admin of admins ?? []) {
+    for (const admin of admins) {
       if (admin.id === user.id) continue
 
       await supabaseAdmin.from("notifications").insert({

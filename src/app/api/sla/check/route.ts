@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { sendTicketEmail } from "@/lib/email"
+import { loadTicketAdminPicker } from "@/lib/org"
+import { fetchAllRows } from "@/lib/fetch-all-rows"
 
 export const runtime = "nodejs"
 
@@ -38,6 +40,15 @@ export async function GET(req: Request) {
     const now = new Date()
     const results = { admin_alerts: 0, response_breaches: 0, resolution_breaches: 0 }
 
+    // Alerts go to the admins responsible for each requester's organization
+    const [adminsFor, { data: allUsers }] = await Promise.all([
+      loadTicketAdminPicker(supabase),
+      fetchAllRows<{ id: string; email: string | null }>((from, to) =>
+        supabase.from("users").select("id, email").order("id").range(from, to)
+      ),
+    ])
+    const emailById = new Map(allUsers.map((u) => [u.id, u.email]))
+
     /* ─── 1. 10-minute admin alert (not yet acquired, not yet notified) ─── */
     const tenMinAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString()
     const { data: almostBreached } = await supabase
@@ -49,12 +60,6 @@ export async function GET(req: Request) {
       .lte("created_at", tenMinAgo)
 
     if (almostBreached && almostBreached.length > 0) {
-      /* Get all admin users */
-      const { data: admins } = await supabase
-        .from("users")
-        .select("id, name:full_name, email")
-        .in("role", ["admin", "superadmin"])
-
       for (const ticket of almostBreached) {
         // Mark as notified
         await supabase
@@ -62,15 +67,10 @@ export async function GET(req: Request) {
           .update({ sla_admin_notified: true })
           .eq("id", ticket.id)
 
-        // Get requester email
-        const { data: requester } = await supabase
-          .from("users")
-          .select("email, name:full_name")
-          .eq("id", ticket.requester_id)
-          .single()
+        const requesterEmail = emailById.get(ticket.requester_id) ?? null
 
-        // Notify each admin
-        for (const admin of admins ?? []) {
+        // Notify each admin of the requester's organization
+        for (const admin of adminsFor(requesterEmail)) {
           // In-app notification
           await supabase.from("notifications").insert({
             user_id: admin.id,
@@ -90,8 +90,8 @@ export async function GET(req: Request) {
               ticketId: ticket.id,
               ticketSubject: ticket.subject,
               action: "sla_warning",
-              comment: `⚠️ SLA WARNING: This ticket has been waiting for ${Math.round((now.getTime() - new Date(ticket.created_at).getTime()) / 60000)} minutes without being acquired.\n\nEmployee: ${ticket.requester_name}\nEmail: ${requester?.email ?? "N/A"}\nContact: ${ticket.contact ?? "N/A"}\nLocation: ${ticket.location ?? "N/A"}\nCategory: ${ticket.category ?? "N/A"}\nPriority: ${ticket.priority ?? "N/A"}\n\nOnly 5 minutes remaining before SLA response breach!`,
-            }).catch(() => {})
+              comment: `⚠️ SLA WARNING: This ticket has been waiting for ${Math.round((now.getTime() - new Date(ticket.created_at).getTime()) / 60000)} minutes without being acquired.\n\nEmployee: ${ticket.requester_name}\nEmail: ${requesterEmail ?? "N/A"}\nContact: ${ticket.contact ?? "N/A"}\nLocation: ${ticket.location ?? "N/A"}\nCategory: ${ticket.category ?? "N/A"}\nPriority: ${ticket.priority ?? "N/A"}\n\nOnly 5 minutes remaining before SLA response breach!`,
+            }).catch((err) => console.error("SLA email failed:", err))
           }
         }
         results.admin_alerts++
@@ -109,19 +109,16 @@ export async function GET(req: Request) {
       .lte("created_at", fifteenMinAgo)
 
     if (responseBreached && responseBreached.length > 0) {
-      const { data: admins } = await supabase
-        .from("users")
-        .select("id, name:full_name, email")
-        .in("role", ["admin", "superadmin"])
-
       for (const ticket of responseBreached) {
+        const admins = adminsFor(emailById.get(ticket.requester_id))
+
         await supabase
           .from("tickets")
           .update({ sla_response_breached: true })
           .eq("id", ticket.id)
 
         // Log activity
-        const systemActorId = (admins && admins.length > 0) ? admins[0].id : ticket.requester_id
+        const systemActorId = admins[0]?.id ?? ticket.requester_id
         await supabase.from("ticket_activity").insert({
           ticket_id: ticket.id,
           actor_id: systemActorId,
@@ -129,7 +126,7 @@ export async function GET(req: Request) {
           details: { message: "Ticket was not acquired within 15 minutes" },
         })
 
-        for (const admin of admins ?? []) {
+        for (const admin of admins) {
           await supabase.from("notifications").insert({
             user_id: admin.id,
             actor_id: ticket.requester_id,
@@ -148,7 +145,7 @@ export async function GET(req: Request) {
               ticketSubject: ticket.subject,
               action: "sla_breach",
               comment: `🚨 SLA BREACH: Ticket #${ticket.id.slice(0, 8).toUpperCase()} has breached the 15-minute response SLA.\n\nRaised by: ${ticket.requester_name}\nNo engineer has acquired this ticket yet.\n\nImmediate action required.`,
-            }).catch(() => {})
+            }).catch((err) => console.error("SLA email failed:", err))
           }
         }
         results.response_breaches++
@@ -165,18 +162,15 @@ export async function GET(req: Request) {
       .lte("sla_resolution_at", now.toISOString())
 
     if (resolutionBreached && resolutionBreached.length > 0) {
-      const { data: admins } = await supabase
-        .from("users")
-        .select("id, name:full_name, email")
-        .in("role", ["admin", "superadmin"])
-
       for (const ticket of resolutionBreached) {
+        const admins = adminsFor(emailById.get(ticket.requester_id))
+
         await supabase
           .from("tickets")
           .update({ sla_resolution_breached: true })
           .eq("id", ticket.id)
 
-        const systemActorId = ticket.assignee ?? ((admins && admins.length > 0) ? admins[0].id : ticket.requester_id)
+        const systemActorId = ticket.assignee ?? admins[0]?.id ?? ticket.requester_id
         await supabase.from("ticket_activity").insert({
           ticket_id: ticket.id,
           actor_id: systemActorId,
@@ -185,7 +179,7 @@ export async function GET(req: Request) {
         })
 
         // Notify admin + assigned engineer
-        const notifyUsers = [...(admins ?? [])]
+        const notifyUsers: { id: string; name: string | null; email: string | null }[] = [...admins]
 
         if (ticket.assignee) {
           const { data: engineer } = await supabase
@@ -219,7 +213,7 @@ export async function GET(req: Request) {
               ticketSubject: ticket.subject,
               action: "sla_breach",
               comment: `🚨 SLA BREACH: Ticket #${ticket.id.slice(0, 8).toUpperCase()} was not resolved within the defined 6-hour SLA time.\n\nRaised by: ${ticket.requester_name}\nTicket was not resolved within the defined SLA time.\n\nPlease take immediate action.`,
-            }).catch(() => {})
+            }).catch((err) => console.error("SLA email failed:", err))
           }
         }
         results.resolution_breaches++

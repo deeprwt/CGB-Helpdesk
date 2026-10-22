@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { fetchAllRows } from "@/lib/fetch-all-rows"
 
 /**
  * Extracts the organisation domain from an email address.
@@ -152,4 +153,67 @@ export async function getOrgUserIdsByDomains(
  */
 export function buildEmailDomainFilter(domains: string[]): string {
   return domains.map((d) => `email.ilike.%@${d}`).join(",")
+}
+
+/* ─────────────────────────────────────────────────────────
+   Ticket notification recipients
+   ───────────────────────────────────────────────────────── */
+
+export type TicketAdmin = {
+  id: string
+  email: string | null
+  name: string | null
+  role: string
+}
+
+/**
+ * Admins who should hear about a ticket: every superadmin, plus admins whose
+ * email domain is the requester's organization or who were granted access to
+ * it (Super Admin → Access Control). Same rule AskMira uses.
+ *
+ * Loads admins and grants once and returns a picker, so loops over many
+ * tickets (e.g. the SLA check) don't re-query per ticket.
+ */
+export async function loadTicketAdminPicker(
+  supabase: SupabaseClient
+): Promise<(requesterEmail: string | null | undefined) => TicketAdmin[]> {
+  const [{ data: admins }, { data: orgs }, { data: access }] = await Promise.all([
+    supabase
+      .from("users")
+      .select("id, email, name:full_name, role")
+      .in("role", ["admin", "superadmin"]),
+    supabase.from("organizations").select("id, domain"),
+    fetchAllRows<{ user_id: string; organization_id: string }>((from, to) =>
+      supabase
+        .from("user_organization_access")
+        .select("user_id, organization_id")
+        .order("id")
+        .range(from, to)
+    ),
+  ])
+
+  const orgIdByDomain = new Map(
+    (orgs ?? []).map((o: { id: string; domain: string }) => [o.domain, o.id])
+  )
+  const grants = new Set(access.map((a) => `${a.user_id}:${a.organization_id}`))
+
+  return (requesterEmail) => {
+    const domain = extractOrgDomain(requesterEmail ?? "")
+    const orgId = orgIdByDomain.get(domain)
+    return ((admins ?? []) as TicketAdmin[]).filter(
+      (a) =>
+        a.role === "superadmin" ||
+        (!!domain && extractOrgDomain(a.email ?? "") === domain) ||
+        (!!orgId && grants.has(`${a.id}:${orgId}`))
+    )
+  }
+}
+
+/** Admins to notify about a ticket raised by `requesterEmail`. */
+export async function getTicketAdmins(
+  supabase: SupabaseClient,
+  requesterEmail: string | null | undefined
+): Promise<TicketAdmin[]> {
+  const pick = await loadTicketAdminPicker(supabase)
+  return pick(requesterEmail)
 }
