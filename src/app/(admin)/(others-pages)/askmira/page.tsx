@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Building2, Link2, Loader2, Unplug } from "lucide-react"
+import { AlertTriangle, Building2, Link2, Loader2, Unplug } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import RoleGate from "@/components/auth/RoleGate"
@@ -31,7 +31,7 @@ async function call(method: "GET" | "DELETE", query = "") {
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error ?? "Could not reach the helpdesk.")
-  return body as { organizations: Company[] }
+  return body as { organizations: Company[]; ready?: boolean; problem?: string | null }
 }
 
 /**
@@ -41,12 +41,17 @@ async function call(method: "GET" | "DELETE", query = "") {
  */
 export default function AskMiraPage() {
   const [companies, setCompanies] = React.useState<Company[] | null>(null)
+  // Why connecting can't work here yet (the AskMira tables are missing), when it can't.
+  const [problem, setProblem] = React.useState<string | null>(null)
   const [removing, setRemoving] = React.useState<Company | null>(null)
   const [busy, setBusy] = React.useState(false)
 
   React.useEffect(() => {
     call("GET")
-      .then((r) => setCompanies(r.organizations))
+      .then((r) => {
+        setCompanies(r.organizations)
+        setProblem(r.problem ?? null)
+      })
       .catch((err: Error) => {
         toast.error(err.message)
         setCompanies([])
@@ -75,6 +80,15 @@ export default function AskMiraPage() {
           title="AskMira"
           description="Companies connected to AskMira, the HRMS. AskMira sends their people here, signs them in without a second password, and shows them their tickets and assets."
         />
+
+        {problem ? (
+          <Card className="border-amber-200 dark:border-amber-500/30">
+            <CardContent className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              <span>{problem}</span>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

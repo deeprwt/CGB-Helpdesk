@@ -44,6 +44,35 @@ export class HttpError extends Error {
 
 export const httpError = (status: number, message: string) => new HttpError(status, message)
 
+/** What every AskMira endpoint says while its tables are missing from the database. */
+export const SETUP_MESSAGE =
+  "This helpdesk is not set up for AskMira yet: its database does not have the AskMira tables. " +
+  "Whoever runs the helpdesk needs to run supabase/migration_askmira.sql once in the Supabase " +
+  "SQL Editor; then try again."
+
+/** A database error saying a table does not exist: PostgREST's (PGRST205) or Postgres's (42P01). */
+export function isMissingTable(err: unknown) {
+  if (!err || typeof err !== "object") return false
+  const { code, message } = err as { code?: unknown; message?: unknown }
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    /could not find the table|relation "?[\w.]+"? does not exist/i.test(String(message ?? ""))
+  )
+}
+
+const TABLES = ["askmira_links", "askmira_connect_codes", "askmira_people", "askmira_used_tokens"]
+
+/**
+ * Whether supabase/migration_askmira.sql has been run. A plain GET for no rows:
+ * a HEAD request can't tell, because PostgREST's "no such table" 404 has no body
+ * then and reads as an empty success.
+ */
+export async function tablesReady() {
+  const answers = await Promise.all(TABLES.map((t) => db().from(t).select("*").limit(0)))
+  return !answers.some((answer) => isMissingTable(answer.error))
+}
+
 /* ── The database, as the server ─────────────────────────── */
 
 let client: SupabaseClient | null = null
@@ -85,6 +114,10 @@ export async function respond(work: () => Promise<unknown>) {
   } catch (err) {
     if (err instanceof HttpError) {
       return NextResponse.json({ error: err.message }, { status: err.status })
+    }
+    if (isMissingTable(err)) {
+      console.error("[AskMira] the AskMira tables are missing:", err)
+      return NextResponse.json({ error: SETUP_MESSAGE }, { status: 503 })
     }
     console.error("[AskMira] request failed:", err)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
@@ -307,7 +340,9 @@ export async function spendOnce(claims: Claims, refusal: string) {
   const { error } = await db()
     .from("askmira_used_tokens")
     .insert({ jti: claims.jti.slice(0, 64), expires_at: new Date(claims.exp * 1000).toISOString() })
-  if (error) throw httpError(401, refusal)
+  // Only a duplicate means the token was used before; any other failure is the database's.
+  if (error?.code === "23505") throw httpError(401, refusal)
+  if (error) throw error
 }
 
 /* ── People ──────────────────────────────────────────────── */

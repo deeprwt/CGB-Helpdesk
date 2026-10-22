@@ -45,6 +45,7 @@ type Stage =
   | { kind: "broken" }
   | { kind: "signin" }
   | { kind: "refused"; message: string }
+  | { kind: "unready"; message: string }
   | { kind: "ready"; organizations: Organization[] }
 
 /** What AskMira will be able to do once allowed. */
@@ -111,6 +112,10 @@ export default function ConnectAskMira() {
           kind: "refused",
           message: "This helpdesk is not set up to connect to AskMira yet. Ask the person who runs it.",
         })
+      }
+      if (data.ready === false) {
+        // Its database lacks the AskMira tables: nothing an admin here can fix by signing in again.
+        return setStage({ kind: "unready", message: data.problem ?? "This helpdesk is not set up for AskMira yet." })
       }
       const organizations: Organization[] = data.organizations ?? []
       if (!organizations.length) {
@@ -213,6 +218,13 @@ export default function ConnectAskMira() {
             </p>
             <Button className="h-11" onClick={() => window.location.assign(signInHref())}>
               <LogIn /> Sign in to continue
+            </Button>
+          </div>
+        ) : stage.kind === "unready" ? (
+          <div className="flex flex-col gap-4">
+            <Notice>{stage.message}</Notice>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              Check again
             </Button>
           </div>
         ) : stage.kind === "refused" ? (

@@ -25,7 +25,9 @@ import {
   db,
   derive,
   httpError,
+  SETUP_MESSAGE,
   sha256hex,
+  tablesReady,
   type Organization,
   type Person,
 } from "./core"
@@ -106,15 +108,20 @@ function askmiraOrigin(redirectUri: unknown) {
 export async function connections(me: Person) {
   requireAdmin(me)
   const orgs = await organizationsOf(me)
-  const { data: links } = orgs.length
-    ? await db()
-        .from("askmira_links")
-        .select("organization_id, askmira_tenant_id, askmira_name, askmira_origin, connected_at")
-        .in("organization_id", orgs.map((o) => o.id))
-    : { data: [] }
+  // Said before anyone presses Allow, rather than failing when they do.
+  const ready = await tablesReady()
+  const { data: links } =
+    ready && orgs.length
+      ? await db()
+          .from("askmira_links")
+          .select("organization_id, askmira_tenant_id, askmira_name, askmira_origin, connected_at")
+          .in("organization_id", orgs.map((o) => o.id))
+      : { data: [] }
   const byOrg = new Map((links ?? []).map((l) => [l.organization_id, l]))
   return {
     can_connect: canConnect(),
+    ready,
+    problem: ready ? null : SETUP_MESSAGE,
     organizations: orgs.map((o) => {
       const link = byOrg.get(o.id)
       return {
@@ -147,10 +154,12 @@ export async function approve(me: Person, body: Record<string, unknown>) {
   const callback = askmiraOrigin(body.redirect_uri)
   const org = await organizationFor(me, body.organization_id)
 
-  const { data: links } = await db()
+  const { data: links, error: linksError } = await db()
     .from("askmira_links")
     .select("organization_id, askmira_tenant_id")
     .or(`organization_id.eq.${org.id},askmira_tenant_id.eq.${tenantId}`)
+  // Missing tables included: `respond` turns that into SETUP_MESSAGE.
+  if (linksError) throw linksError
   if ((links ?? []).some((l) => l.organization_id === org.id && l.askmira_tenant_id !== tenantId)) {
     throw httpError(409, `${org.name} is already connected to another AskMira workspace. Disconnect it first.`)
   }
@@ -184,13 +193,14 @@ export async function swap(body: Record<string, unknown>) {
   const refused = httpError(400, "This connect code is not valid or has expired.")
   if (!code || code.length > 200 || !PKCE_RE.test(verifier)) throw refused
   // One use, whatever happens next.
-  const { data: used } = await db()
+  const { data: used, error: usedError } = await db()
     .from("askmira_connect_codes")
     .update({ used_at: new Date().toISOString() })
     .eq("code_hash", sha256hex(code))
     .is("used_at", null)
     .gt("expires_at", new Date().toISOString())
     .select()
+  if (usedError) throw usedError
   const row = used?.[0]
   if (!row) throw refused
   const challenge = crypto.createHash("sha256").update(verifier).digest("base64url")
@@ -209,10 +219,11 @@ export async function swap(body: Record<string, unknown>) {
     .eq("id", row.organization_id)
     .maybeSingle()
   if (!org) throw refused
-  const { data: clash } = await db()
+  const { data: clash, error: clashError } = await db()
     .from("askmira_links")
     .select("organization_id, askmira_tenant_id")
     .or(`organization_id.eq.${org.id},askmira_tenant_id.eq.${tenantId}`)
+  if (clashError) throw clashError
   if ((clash ?? []).some((l) => (l.organization_id === org.id) !== (l.askmira_tenant_id === tenantId))) {
     throw httpError(409, "That AskMira workspace or this company is already connected elsewhere.")
   }
