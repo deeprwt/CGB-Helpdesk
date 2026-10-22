@@ -36,6 +36,12 @@ const inputClass =
 const leadingIconClass =
   "pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500"
 
+/** Where to go after signing in: `?redirect=` when it is a page of this site, else the dashboard. */
+function afterSignIn() {
+  const target = new URLSearchParams(window.location.search).get("redirect") ?? ""
+  return /^\/(?![/\\])/.test(target) ? target : "/"
+}
+
 export default function SignInForm() {
   const [showPassword, setShowPassword] = React.useState(false)
   const [remember, setRemember] = React.useState(false)
@@ -128,7 +134,7 @@ export default function SignInForm() {
     toast.success("Login Successfully")
 
     setTimeout(() => {
-      window.location.href = "/"
+      window.location.href = afterSignIn()
     }, 800)
   }
 

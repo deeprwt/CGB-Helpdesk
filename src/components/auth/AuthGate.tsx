@@ -4,7 +4,16 @@ import { useEffect, useState, useCallback } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
-const PUBLIC_ROUTES = ["/signin", "/signup", "/reset-password", "/update-password", "/verify-email"]
+const PUBLIC_ROUTES = [
+  "/signin",
+  "/signup",
+  "/reset-password",
+  "/update-password",
+  "/verify-email",
+  // AskMira: Allow asks for sign-in itself; the sign-in link from AskMira makes the session.
+  "/connect/askmira",
+  "/sso/askmira",
+]
 
 export default function AuthGate({
   children,

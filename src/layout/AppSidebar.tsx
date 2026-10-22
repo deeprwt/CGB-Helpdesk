@@ -13,6 +13,7 @@ import {
   Boxes,
   Building2,
   ShieldCheck,
+  Link2,
   Plus,
   LogOut,
   MoreVertical,
@@ -58,6 +59,7 @@ const NAV_SECTIONS: NavSection[] = [
       { name: "User Profile", icon: UserCircle2, path: "/profile", roles: ALL },
       { name: "User & Role", icon: Users, path: "/user", roles: STAFF },
       { name: "Assets", icon: Boxes, path: "/assets", roles: STAFF },
+      { name: "AskMira", icon: Link2, path: "/askmira", roles: ["admin", "superadmin"] },
     ],
   },
   {

@@ -198,6 +198,7 @@ type Asset = {
 type AssetRow = Asset & {
   assigned: boolean
   assigned_email: string | null
+  serial_no: string | null
 }
 
 const DEFAULT_PAGE_SIZE = 10
@@ -321,7 +322,7 @@ export default function AssetsPage() {
     const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
 
     // fetchAllRows: Supabase returns max 1000 rows per request
-    const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }] =
+    const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }, { data: serials }] =
       await Promise.all([
         // "*" keeps the list working even before organization_id exists
         // (supabase/migration_asset_organization.sql not yet run)
@@ -354,6 +355,16 @@ export default function AssetsPage() {
         ),
 
         supabase.from("organizations").select("id, name, domain").order("name"),
+
+        // Serial numbers live in asset_details (key = "serial_no"), used by search
+        fetchAllRows((from, to) =>
+          supabase
+            .from("asset_details")
+            .select("asset_id, value")
+            .eq("key", "serial_no")
+            .order("id")
+            .range(from, to)
+        ),
       ])
 
     if (assetsError) {
@@ -372,12 +383,17 @@ export default function AssetsPage() {
         )
       })
 
+    const serialMap = new Map<string, string>(
+      (serials ?? []).map((d) => [d.asset_id, d.value])
+    )
+
     // All assets are listed; organization is only used as a filter
     const rows: AssetRow[] = ((assets ?? []) as Asset[]).map((a) => ({
       ...a,
       organization_id: a.organization_id ?? null,
       assigned: assignmentMap.has(a.id),
       assigned_email: assignmentMap.get(a.id) ?? null,
+      serial_no: serialMap.get(a.id) ?? null,
     }))
 
     setOrgs((allOrgs ?? []) as Organization[])
@@ -414,6 +430,7 @@ export default function AssetsPage() {
       if (q) {
         const haystack = [
           r.asset_code,
+          r.serial_no,
           r.asset_type,
           r.model,
           r.location,
@@ -1171,7 +1188,7 @@ export default function AssetsPage() {
             searchable
             search={search}
             onSearchChange={setSearch}
-            searchPlaceholder="Search code, model, user, location…"
+            searchPlaceholder="Search code, serial no, model, user, location…"
             filters={mobileFilterButton}
             subHeader={subHeader}
             pagination={{
