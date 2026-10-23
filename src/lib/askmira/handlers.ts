@@ -8,6 +8,12 @@ import { launch as signIn } from "./launch"
 import { syncPeople } from "./people"
 import { QUERIES } from "./queries"
 
+/** Whether AskMira says the person is HR (core.actorIn has checked the role is admin or user). */
+function hrOf(body: Record<string, unknown>) {
+  const actor = body.actor
+  return Boolean(actor && typeof actor === "object" && (actor as { role?: unknown }).role === "admin")
+}
+
 function paramsOf(body: Record<string, unknown>) {
   const params = body.params
   return params && typeof params === "object" && !Array.isArray(params)
@@ -39,7 +45,7 @@ export const queryRoute = (req: Request) =>
     const answer = Object.hasOwn(QUERIES, kind) ? QUERIES[kind] : null
     if (!answer) throw httpError(422, "Unknown query.")
     const me = await actorIn(org, body.actor)
-    return { kind, ...(await answer({ org, me, params: paramsOf(body) })) }
+    return { kind, ...(await answer({ org, me, params: paramsOf(body), hr: hrOf(body) })) }
   })
 
 /** POST act — raise a ticket or reply, as one person (use=act, each token once). */
@@ -51,7 +57,7 @@ export const actRoute = (req: Request) =>
     if (!action) throw httpError(422, "Unknown action.")
     await spendOnce(claims, "This request was already carried out.")
     const me = await actorIn(org, body.actor)
-    return { kind, ...(await action({ org, me, params: paramsOf(body) })) }
+    return { kind, ...(await action({ org, me, params: paramsOf(body), hr: hrOf(body) })) }
   })
 
 /** POST connect/token — AskMira's server swaps the one-time code (no token yet: PKCE). */

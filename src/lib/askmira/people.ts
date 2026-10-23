@@ -6,10 +6,12 @@
 //
 // * Someone new gets an account (no password: they come in from AskMira).
 // * Their name, employee code, department and designation follow AskMira.
-// * AskMira's role is the least they get. HR in AskMira are admins here; an
-//   engineer or admin set up here keeps that role, because IT staff are
-//   decided here. If AskMira made someone an admin and they stop being HR,
-//   they get back the role they had before.
+// * Roles here are this helpdesk's own: AskMira never makes anyone an engineer
+//   or an admin, because those roles reach every organization the helpdesk
+//   serves (every client's assets, for one). Someone new starts as a user;
+//   HR's view of their own company in AskMira needs no role here (queries.ts).
+//   Anyone an earlier version of this connection made an admin, for being HR
+//   in AskMira, gets back the role they had before.
 // * Someone AskMira manages who drops out of the roster (they left) can't
 //   sign in any more. People added here directly are never touched, and
 //   neither is a super admin.
@@ -81,22 +83,13 @@ function nameParts(name: string) {
 }
 
 /**
- * The role someone should have here now, and the role to give back later.
- * Returns the new role (or null to leave it) and the remembered one.
+ * Undoes an earlier version of this connection, which made HR admins here.
+ * Returns the role to give back (or null to leave the role alone) and what is
+ * still to be remembered: nothing, once given back or changed here since.
  */
-export function roleFor(
-  current: string,
-  wanted: "admin" | "user",
-  before: string | null
-): { role: string | null; before: string | null } {
-  if (current === "superadmin") return { role: null, before: null }
-  if (wanted === "admin") {
-    if (current === "admin") return { role: null, before }
-    return { role: "admin", before: current }
-  }
+export function roleFor(current: string, before: string | null): { role: string | null; before: string | null } {
   if (before && current === "admin") return { role: before, before: null }
-  // Someone here changed their role since AskMira raised it: theirs stands.
-  return { role: null, before: current === "admin" ? before : null }
+  return { role: null, before: null }
 }
 
 /** A new account for someone AskMira sent: no password, they arrive from AskMira. */
@@ -115,7 +108,8 @@ export async function createPerson(
     throw httpError(409, `Could not create a ${BRAND} account: ${error?.message ?? "no user"}`.slice(0, 200))
   }
   const id = data.user.id
-  const role = person.role === "admin" ? "admin" : "user"
+  // Everyone starts as a user: the IT team makes engineers and admins here.
+  const role = "user"
   // The sign-up trigger usually makes this row already; fill in what AskMira knows.
   const profile: Record<string, unknown> = { id, email: person.email, full_name: name, role }
   if (person.employee_code) profile.employee_id = person.employee_code
@@ -134,7 +128,7 @@ export async function createPerson(
       organization_id: org.id,
       user_id: id,
       askmira_user_id: person.id,
-      role_before_grant: role === "admin" ? "user" : null,
+      role_before_grant: null,
       deactivated_at: null,
       updated_at: new Date().toISOString(),
     },
@@ -156,17 +150,17 @@ export async function managedRow(org: Organization, userId: string): Promise<Man
 }
 
 /**
- * Brings an existing account in step with AskMira: its role, and AskMira
- * managing it from now on. Used when someone signs in from AskMira.
+ * Brings an existing account in step with AskMira: AskMira manages it from now
+ * on (and any admin role an earlier version granted goes back). Used when
+ * someone signs in from AskMira.
  */
 export async function adopt(
   org: Organization,
   person: Person,
-  askmiraUserId: string | null,
-  wanted: "admin" | "user"
+  askmiraUserId: string | null
 ): Promise<Person> {
   const row = await managedRow(org, person.id)
-  const next = roleFor(person.role, wanted, row?.role_before_grant ?? null)
+  const next = roleFor(person.role, row?.role_before_grant ?? null)
   if (next.role) {
     const { error } = await db().from("users").update({ role: next.role }).eq("id", person.id)
     if (error) throw error
@@ -268,7 +262,7 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
     if (person.designation && person.designation !== current.designation) {
       patch.designation = person.designation
     }
-    const next = roleFor(current.role, person.role, row?.role_before_grant ?? null)
+    const next = roleFor(current.role, row?.role_before_grant ?? null)
     if (next.role) patch.role = next.role
     if (Object.keys(patch).length) {
       const { error } = await db().from("users").update(patch).eq("id", current.id)

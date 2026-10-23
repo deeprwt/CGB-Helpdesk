@@ -70,7 +70,7 @@ export async function launch(token: string) {
     if ((await managedRow(org, person.id))?.deactivated_at) {
       throw httpError(403, `Your ${BRAND} account has been switched off.`)
     }
-    person = await adopt(org, person, askmiraUserId, role)
+    person = await adopt(org, person, askmiraUserId)
   }
 
   // A one-time code for this person, turned into a session by the page. Nothing is emailed.

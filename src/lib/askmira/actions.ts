@@ -24,12 +24,8 @@ import {
   isStaff,
   shortRef,
   type Organization,
-  type Person,
 } from "./core"
-import { openTicket } from "./queries"
-
-type Params = Record<string, unknown>
-type Ctx = { org: Organization; me: Person; params: Params }
+import { mayWrite, openTicket, type Ctx } from "./queries"
 
 /** Admins who look after this company, and the super admins. */
 async function companyAdmins(org: Organization) {
@@ -162,6 +158,9 @@ async function createTicket(ctx: Ctx) {
 async function reply(ctx: Ctx) {
   const { me, params } = ctx
   const ticket = await openTicket(ctx, params.ticket_id)
+  if (!mayWrite(me, ticket)) {
+    throw httpError(403, "Only the person who raised it and the IT team write on a ticket.")
+  }
   const text = clean(params.message, 4000)
   if (!text) throw httpError(422, "Write a message first.")
   if (ticket.status === "closed") {

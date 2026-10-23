@@ -1,29 +1,40 @@
 // What AskMira reads for one person: their tickets, the queues they work, the
-// company's assets. Read-only.
+// assets. Read-only.
 //
 //   POST /api/integrations/askmira/query   use=query, `bh` = SHA-256 of the body
 //   { tenant_id, actor: { id, email, role }, kind, params }
 //
 // The person must have an account here in the connected organization
-// (core.actorIn), and sees what they see when they open the helpdesk, within
-// that organization only:
+// (core.actorIn). They see what the helpdesk itself shows them:
+//
+// * Its IT team (engineers, admins, super admins) see what its own screens show
+//   them: every organization's assets, as on the Assets page, and the tickets
+//   of the organizations they look after (lib/org.ts getUserAccessibleDomains:
+//   every organization for a super admin, those granted under Access Control
+//   for anyone else, otherwise their own).
+// * HR in AskMira (actor role "admin") who are not on the IT team read their
+//   own company — the connected organization — and nothing else.
+// * Everyone else: their own tickets and the assets they hold.
 //
 //   tickets  scope "mine"      tickets they raised
-//            scope "assigned"  tickets assigned to them         engineers and admins
-//            scope "queue"     the company's unassigned tickets engineers and admins
-//            scope "company"   all the company's tickets        admins
+//            scope "assigned"  tickets assigned to them                 IT team
+//            scope "queue"     unassigned tickets of their companies    IT team
+//            scope "company"   all tickets of their companies           IT admins, HR
 //   ticket   one ticket and its conversation, if they may open it
 //   overview counts for the scopes above that are theirs
 //   assets   scope "mine"      what is assigned to them now
-//            scope "company"   the company's asset register     engineers and admins
+//            scope "company"   the asset register                       IT team, HR
 //   options  what the New Ticket form offers them
+//
+// Lists take `limit` (at most 100) and `offset`, for paging.
 
+import { buildEmailDomainFilter, getUserAccessibleDomains } from "@/lib/org"
 import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
 import {
   BRAND,
   UUID_RE,
+  allRows,
   chunks,
-  companyPeopleIds,
   db,
   domainOf,
   httpError,
@@ -42,9 +53,12 @@ const ASSET_SCOPES = ["mine", "company"]
 const MAX_WINDOW_MS = 100 * 24 * 60 * 60 * 1000
 /** Requester ids per request: keeps the address PostgREST reads short. */
 const ID_CHUNK = 150
+/** PostgREST hands back at most this many rows per request. */
+const MAX_ROWS = 1000
 
 type Params = Record<string, unknown>
-type Ctx = { org: Organization; me: Person; params: Params }
+/** Who is asking: their account here, and whether AskMira says they are HR. */
+export type Ctx = { org: Organization; me: Person; params: Params; hr: boolean }
 
 type TicketRow = {
   id: string
@@ -68,6 +82,11 @@ const TICKET_COLUMNS =
 function limitOf(params: Params) {
   const n = Number(params.limit)
   return Number.isInteger(n) && n > 0 ? Math.min(n, 100) : 25
+}
+
+function offsetOf(params: Params) {
+  const n = Number(params.offset)
+  return Number.isInteger(n) && n > 0 ? Math.min(n, 100_000) : 0
 }
 
 function instantOf(value: unknown, name: string) {
@@ -96,16 +115,40 @@ async function names(ids: (string | null | undefined)[]) {
   return out
 }
 
+/**
+ * The email domains whose tickets this person works: for the IT team, the
+ * organizations the helpdesk gives them (as its own queue does); for HR who are
+ * not on it, their own company; for anyone else, none.
+ */
+async function workDomains(ctx: Ctx): Promise<string[]> {
+  const { me, org } = ctx
+  if (isStaff(me)) {
+    const domains = await getUserAccessibleDomains(db(), me.id, me.email, me.role)
+    return [...new Set(domains.map((d) => d.toLowerCase()).filter(Boolean))]
+  }
+  return ctx.hr ? [org.domain] : []
+}
+
+/** Everyone whose address is on one of `domains`: tickets belong to their requester's company. */
+async function peopleIn(domains: string[]): Promise<string[]> {
+  if (!domains.length) return []
+  const rows = await allRows<{ id: string }>((from, to) =>
+    db().from("users").select("id").or(buildEmailDomainFilter(domains)).order("id").range(from, to)
+  )
+  return rows.map((r) => r.id)
+}
+
 /* ── Tickets ─────────────────────────────────────────────── */
 
-function ticketScope(me: Person, value: unknown) {
+function ticketScope(ctx: Ctx, value: unknown) {
+  const { me } = ctx
   const scope = String(value || "mine")
   if (!TICKET_SCOPES.includes(scope)) throw httpError(422, "Unknown scope.")
   if ((scope === "assigned" || scope === "queue") && !isStaff(me)) {
-    throw httpError(403, `Only ${BRAND} engineers and admins have a ticket queue.`)
+    throw httpError(403, `Only ${BRAND}'s IT team has a ticket queue.`)
   }
-  if (scope === "company" && !isAdmin(me)) {
-    throw httpError(403, `Only a ${BRAND} admin sees all of the company's tickets.`)
+  if (scope === "company" && !isAdmin(me) && !ctx.hr) {
+    throw httpError(403, `Only HR and ${BRAND} admins see all of a company's tickets.`)
   }
   return scope
 }
@@ -119,9 +162,8 @@ type TicketFilter = {
 }
 
 /**
- * Runs `build` over the tickets in `scope`, once per batch of the company's
- * people when the scope is company-wide. Tickets belong to the company their
- * requester's address is on, as everywhere in the helpdesk.
+ * Runs `shape` over the tickets in `scope`. Your own and your assigned tickets
+ * are one request; a company's are one request per batch of its people.
  */
 async function overTickets<T>(
   ctx: Ctx,
@@ -130,7 +172,7 @@ async function overTickets<T>(
   head: boolean,
   shape: (q: any) => PromiseLike<{ data: T[] | null; count: number | null; error: unknown }>
 ) {
-  const { org, me } = ctx
+  const { me } = ctx
   const base = () => {
     let q = db().from("tickets").select(columns, { count: "exact", head })
     if (filter.scope === "mine") q = q.eq("requester_id", me.id)
@@ -145,40 +187,40 @@ async function overTickets<T>(
     if (filter.to) q = q.lt("created_at", filter.to)
     return q
   }
+  const batches: (string[] | null)[] =
+    filter.scope === "mine" || filter.scope === "assigned"
+      ? [null]
+      : [...chunks(await peopleIn(await workDomains(ctx)), ID_CHUNK)]
   const results: { data: T[]; count: number }[] = []
-  if (filter.scope === "mine") {
-    const { data, count, error } = await shape(base())
+  for (const batch of batches) {
+    const { data, count, error } = await shape(batch ? base().in("requester_id", batch) : base())
     if (error) throw error
     results.push({ data: data ?? [], count: count ?? 0 })
-  } else {
-    const people = await companyPeopleIds(org)
-    for (const chunk of chunks(people, ID_CHUNK)) {
-      const { data, count, error } = await shape(base().in("requester_id", chunk))
-      if (error) throw error
-      results.push({ data: data ?? [], count: count ?? 0 })
-    }
   }
   return results
 }
 
 async function ticketsAnswer(ctx: Ctx) {
   const { params } = ctx
-  const scope = ticketScope(ctx.me, params.scope)
+  const scope = ticketScope(ctx, params.scope)
   const status = TICKET_STATUSES.includes(String(params.status)) ? String(params.status) : null
   const limit = limitOf(params)
+  const offset = offsetOf(params)
   const filter = { scope, status, search: searchText(params.query), ...between(params) }
+  // Each batch's newest offset+limit, merged: exact while that stays within one request's rows.
   const parts = await overTickets<TicketRow>(ctx, filter, TICKET_COLUMNS, false, (q) =>
-    q.order("created_at", { ascending: false }).limit(limit)
+    q.order("created_at", { ascending: false }).limit(Math.min(offset + limit, MAX_ROWS))
   )
   const rows = parts
     .flatMap((p) => p.data)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .slice(0, limit)
+    .slice(offset, offset + limit)
   const total = parts.reduce((sum, p) => sum + p.count, 0)
   const who = await names(rows.map((t) => t.assignee))
   return {
     scope,
     total,
+    offset,
     tickets: rows.map((t) => ({
       id: t.id,
       ref: shortRef(t.id),
@@ -217,7 +259,7 @@ async function overviewAnswer(ctx: Ctx) {
     answer.assigned = await byStatus(ctx, "assigned")
     answer.queue = await countIn(ctx, { scope: "queue" })
   }
-  if (isAdmin(me)) answer.company = await byStatus(ctx, "company")
+  if (isAdmin(me) || ctx.hr) answer.company = await byStatus(ctx, "company")
   const { count } = await db()
     .from("asset_assignments")
     .select("id", { count: "exact", head: true })
@@ -227,19 +269,32 @@ async function overviewAnswer(ctx: Ctx) {
   return answer
 }
 
-/** Whether `me` may open this ticket: theirs, or the company's and theirs to work. */
+/**
+ * Whether `me` may open this ticket. Their own; for the IT team, what the
+ * helpdesk's own ticket page lets them open (assigned to them, or unassigned in
+ * a company they look after — any of those for an admin, anything for a super
+ * admin); for HR, their own company's.
+ */
 async function mayOpen(ctx: Ctx, ticket: { requester_id: string; assignee: string | null }) {
   const { me, org } = ctx
-  if (ticket.requester_id === me.id) return true
-  if (!isStaff(me)) return false
+  if (ticket.requester_id === me.id || me.role === "superadmin") return true
+  if (isStaff(me) && ticket.assignee === me.id) return true
   const { data: requester } = await db()
     .from("users")
     .select("email")
     .eq("id", ticket.requester_id)
     .maybeSingle()
-  if (!requester || domainOf(String(requester.email)) !== org.domain) return false
-  return isAdmin(me) || ticket.assignee === me.id || ticket.assignee === null
+  const domain = requester ? domainOf(String(requester.email)) : ""
+  if (!domain) return false
+  if (isStaff(me) && (isAdmin(me) || ticket.assignee === null)) {
+    if ((await workDomains(ctx)).includes(domain)) return true
+  }
+  return ctx.hr && domain === org.domain
 }
+
+/** Whether `me` may write on a ticket they can open: its requester or the IT team, never HR alone. */
+export const mayWrite = (me: Person, ticket: { requester_id: string }) =>
+  ticket.requester_id === me.id || isStaff(me)
 
 export async function openTicket(ctx: Ctx, id: unknown) {
   const ticketId = String(id ?? "")
@@ -307,7 +362,7 @@ async function ticketAnswer(ctx: Ctx) {
       sla_response_at: ticket.sla_response_at ?? null,
       sla_resolution_at: ticket.sla_resolution_at ?? null,
       sla_breached: Boolean(ticket.sla_response_breached || ticket.sla_resolution_breached),
-      can_reply: ticket.status !== "closed",
+      can_reply: ticket.status !== "closed" && mayWrite(ctx.me, ticket),
       asset,
       attachments: (files ?? []).map((f) => ({ name: f.file_name, size: f.file_size })),
     },
@@ -340,6 +395,7 @@ type AssetRow = {
   room: string | null
   purchase_date: string | null
   warranty_expiry: string | null
+  organization_id?: string | null
 }
 
 const ASSET_COLUMNS =
@@ -358,7 +414,13 @@ async function serials(assetIds: string[]) {
   return out
 }
 
-function asset(a: AssetRow, serial: string | undefined, holder: string | null, since: string | null) {
+function asset(
+  a: AssetRow,
+  serial: string | undefined,
+  holder: string | null,
+  since: string | null,
+  organization: string | null = null
+) {
   return {
     id: a.id,
     code: a.asset_code,
@@ -370,6 +432,7 @@ function asset(a: AssetRow, serial: string | undefined, holder: string | null, s
     department: a.department,
     purchase_date: a.purchase_date,
     warranty_expiry: a.warranty_expiry,
+    organization,
     holder,
     assigned_at: since,
   }
@@ -382,6 +445,7 @@ async function assetsAnswer(ctx: Ctx) {
   const status = ASSET_STATUSES.includes(String(params.status)) ? String(params.status) : null
   const search = searchText(params.query)
   const limit = limitOf(params)
+  const offset = offsetOf(params)
 
   if (scope === "mine") {
     const { data: held } = await db()
@@ -401,20 +465,36 @@ async function assetsAnswer(ctx: Ctx) {
     return {
       scope,
       total: rows.length,
+      offset: 0,
       assets: rows.map((a) => asset(a, serial.get(a.id), me.full_name || me.email, since.get(a.id) ?? null)),
     }
   }
 
-  if (!isStaff(me)) throw httpError(403, `Only ${BRAND} engineers and admins see the asset register.`)
+  if (!isStaff(me) && !ctx.hr) {
+    throw httpError(403, `Only ${BRAND}'s IT team and your HR see the asset register.`)
+  }
+  const { data: orgRows } = await db().from("organizations").select("id, name, domain")
+  const orgs = (orgRows ?? []) as Organization[]
+  const orgName = new Map(orgs.map((o) => [o.id, o.name]))
+
   let q = db()
     .from("assets")
-    .select(ASSET_COLUMNS, { count: "exact" })
-    .eq("organization_id", org.id)
+    .select(`${ASSET_COLUMNS}, organization_id`, { count: "exact" })
     .order("asset_code")
-    .limit(limit)
+    .order("id")
+    .range(offset, offset + limit - 1)
+  // The IT team sees every organization's assets, as on the helpdesk's own
+  // Assets page; HR who are not on it see their own company's.
+  if (!isStaff(me)) q = q.eq("organization_id", org.id)
   if (status) q = q.eq("status", status)
   if (search) {
-    q = q.or(`asset_code.ilike.*${search}*,asset_type.ilike.*${search}*,model.ilike.*${search}*`)
+    const s = search.toLowerCase()
+    const matching = orgs
+      .filter((o) => o.name.toLowerCase().includes(s) || String(o.domain).toLowerCase().includes(s))
+      .map((o) => o.id)
+    const any = [`asset_code.ilike.*${search}*`, `asset_type.ilike.*${search}*`, `model.ilike.*${search}*`]
+    if (matching.length) any.push(`organization_id.in.(${matching.join(",")})`)
+    q = q.or(any.join(","))
   }
   const { data, count, error } = await q
   if (error) throw error
@@ -434,9 +514,16 @@ async function assetsAnswer(ctx: Ctx) {
   return {
     scope,
     total: count ?? rows.length,
+    offset,
     assets: rows.map((a) => {
       const h = holders.get(a.id)
-      return asset(a, serial.get(a.id), h ? who.get(h.user_id) ?? null : null, h?.assigned_at ?? null)
+      return asset(
+        a,
+        serial.get(a.id),
+        h ? who.get(h.user_id) ?? null : null,
+        h?.assigned_at ?? null,
+        a.organization_id ? orgName.get(a.organization_id) ?? null : null
+      )
     }),
   }
 }

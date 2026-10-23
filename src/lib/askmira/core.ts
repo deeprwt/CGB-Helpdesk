@@ -381,19 +381,6 @@ export async function belongsTo(person: Person, org: Organization) {
   return Boolean(data?.length)
 }
 
-/** Everyone whose address is on the organization's domain: whose tickets are the company's. */
-export async function companyPeopleIds(org: Organization): Promise<string[]> {
-  const rows = await allRows<{ id: string }>((from, to) =>
-    db()
-      .from("users")
-      .select("id")
-      .ilike("email", `%@${escapeLike(org.domain)}`)
-      .order("id")
-      .range(from, to)
-  )
-  return rows.map((r) => r.id)
-}
-
 /** The person AskMira is asking for, if they may use the helpdesk for this company. */
 export async function actorIn(org: Organization, actor: unknown): Promise<Person> {
   const given = actor && typeof actor === "object" ? (actor as Record<string, unknown>) : {}

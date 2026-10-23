@@ -53,7 +53,8 @@ const GRANTS = [
   "Send your company's people across: an account for each joiner, switched off when they leave.",
   "Open the helpdesk for your people from AskMira, without a second password.",
   "Show each person their tickets and assets in AskMira, and let them raise tickets and reply.",
-  "Show your engineers and admins their queues and the company's asset register.",
+  "Show your HR your company's tickets and assets, and your IT team what the helpdesk shows them.",
+  "AskMira never changes anyone's role here: your IT team decides who are engineers and admins.",
 ]
 
 function readRequest(): Request | null {
