@@ -12,6 +12,7 @@ import type {
 } from "@tanstack/react-table"
 import {
   Columns3,
+  ChevronDown,
   Eye,
   ListFilter,
   Shield,
@@ -30,6 +31,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -41,6 +44,7 @@ import {
 } from "@/components/ui/tooltip"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { changeUserRole } from "@/lib/change-role"
 import { StatCard, StatCardSkeleton, type StatTone } from "@/components/common/stat-card"
 import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
 import { getInitials, roleLabel } from "@/hooks/useCurrentUser"
@@ -104,6 +108,12 @@ export default function EmployeeTable() {
   const [pendingDelete, setPendingDelete] = React.useState<Employee | null>(null)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
 
+  const [currentUserId, setCurrentUserId] = React.useState("")
+  // A role picked from the Role column, waiting for confirmation
+  const [roleChange, setRoleChange] =
+    React.useState<{ user: Employee; role: Role } | null>(null)
+  const [savingRole, setSavingRole] = React.useState(false)
+
   /* ---------------- FETCH USERS ---------------- */
 
   React.useEffect(() => {
@@ -120,6 +130,7 @@ export default function EmployeeTable() {
       }
 
       const userId = session.user.id
+      setCurrentUserId(userId)
 
       const { data: me } = await supabase
         .from("users")
@@ -228,6 +239,38 @@ export default function EmployeeTable() {
     }
   }
 
+  /* ---------------- CHANGE ROLE ---------------- */
+
+  // Same rules as /api/user/role: super admins change anyone but themselves;
+  // admins hand out User, Engineer or Admin, and can't touch super admins
+  const assignableRoles: Role[] =
+    currentRole === "superadmin"
+      ? ["user", "engineer", "admin", "superadmin"]
+      : ["user", "engineer", "admin"]
+
+  const canChangeRole = (user: Employee) =>
+    user.id !== currentUserId &&
+    (currentRole === "superadmin" ||
+      (currentRole === "admin" && user.role !== "superadmin"))
+
+  const saveRole = async () => {
+    if (!roleChange) return
+    const { user, role } = roleChange
+    setSavingRole(true)
+    try {
+      await changeUserRole(user.id, role)
+      setData((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, role } : u))
+      )
+      toast.success(`${user.name} is now ${roleLabel(role)}`)
+      setRoleChange(null)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change role")
+    } finally {
+      setSavingRole(false)
+    }
+  }
+
   /* ---------------- COLUMNS ---------------- */
 
   const columns: ColumnDef<Employee>[] = [
@@ -289,11 +332,49 @@ export default function EmployeeTable() {
     {
       accessorKey: "role",
       header: "Role",
-      cell: ({ row }) => (
-        <StatusBadge tone={ROLE_TONE[row.original.role] ?? "gray"} dot>
-          {roleLabel(row.original.role)}
-        </StatusBadge>
-      ),
+      cell: ({ row }) => {
+        const user = row.original
+        const badge = (
+          <StatusBadge tone={ROLE_TONE[user.role] ?? "gray"} dot>
+            {roleLabel(user.role)}
+            {canChangeRole(user) && <ChevronDown className="size-3 opacity-60" />}
+          </StatusBadge>
+        )
+
+        if (!canChangeRole(user)) return badge
+
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Change role of ${user.name}`}
+                className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-brand-500/50"
+              >
+                {badge}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              <DropdownMenuLabel>Change role</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioGroup
+                value={user.role}
+                onValueChange={(value) => {
+                  if (value !== user.role) {
+                    setRoleChange({ user, role: value as Role })
+                  }
+                }}
+              >
+                {assignableRoles.map((role) => (
+                  <DropdownMenuRadioItem key={role} value={role}>
+                    {roleLabel(role)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )
+      },
     },
     {
       accessorKey: "empId",
@@ -562,6 +643,23 @@ export default function EmployeeTable() {
         emptyIcon={Users}
         emptyTitle="No users found"
         emptyDescription="Try a different search term or clear the role filter."
+      />
+
+      <ConfirmDialog
+        open={!!roleChange}
+        onOpenChange={(open) => {
+          if (!open && !savingRole) setRoleChange(null)
+        }}
+        title="Change role?"
+        description={
+          roleChange
+            ? `Change ${roleChange.user.name} from ${roleLabel(roleChange.user.role)} to ${roleLabel(roleChange.role)}?`
+            : ""
+        }
+        confirmLabel="Change role"
+        variant="info"
+        loading={savingRole}
+        onConfirm={() => void saveRole()}
       />
 
       <ConfirmDialog

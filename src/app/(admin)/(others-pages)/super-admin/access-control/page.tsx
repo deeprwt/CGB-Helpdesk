@@ -39,8 +39,11 @@ import {
   Building2,
   UserCog,
   KeyRound,
+  Loader2,
 } from "lucide-react"
 import { toast } from "sonner"
+import { changeUserRole } from "@/lib/change-role"
+import { roleLabel } from "@/hooks/useCurrentUser"
 
 /* ── Types ────────────────────────────── */
 type Org = { id: string; name: string; domain: string }
@@ -206,19 +209,55 @@ export default function AccessControlPage() {
   }
 
   /* ── Change user role ───────────────── */
+  const [savingRole, setSavingRole] = React.useState(false)
+
   const changeRole = async () => {
     if (!roleTarget || !newRole) return
 
-    await supabase
-      .from("users")
-      .update({ role: newRole })
-      .eq("id", roleTarget.id)
+    setSavingRole(true)
+    try {
+      await changeUserRole(roleTarget.id, newRole)
+      toast.success(`${roleTarget.full_name || roleTarget.email} is now ${roleLabel(newRole)}`)
+      setRoleOpen(false)
+      setRoleTarget(null)
+      setNewRole("")
+      load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to change role")
+    } finally {
+      setSavingRole(false)
+    }
+  }
 
-    toast.success(`${roleTarget.full_name} role changed to ${newRole}`)
-    setRoleOpen(false)
-    setRoleTarget(null)
-    setNewRole("")
-    load()
+  const openRoleDialog = (u: UserRow) => {
+    setRoleTarget(u)
+    setNewRole(u.role)
+    setRoleOpen(true)
+  }
+
+  const roleAction: ColumnDef<UserRow> = {
+    id: "actions",
+    enableSorting: false,
+    header: () => <span className="sr-only">Actions</span>,
+    meta: { className: "text-right", headerClassName: "text-right" },
+    cell: ({ row }) => (
+      <div className="flex items-center justify-end">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Change role of ${row.original.full_name || row.original.email}`}
+              onClick={() => openRoleDialog(row.original)}
+              className="text-brand-500 hover:bg-brand-50 hover:text-brand-600 dark:text-brand-300 dark:hover:bg-brand-500/10"
+            >
+              <UserCog className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Change role</TooltipContent>
+        </Tooltip>
+      </div>
+    ),
   }
 
   // Filter to admins and engineers for the main table (users visible for access control)
@@ -307,37 +346,7 @@ export default function AccessControlPage() {
         )
       },
     },
-    {
-      id: "actions",
-      enableSorting: false,
-      header: () => <span className="sr-only">Actions</span>,
-      meta: { className: "text-right", headerClassName: "text-right" },
-      cell: ({ row }) => {
-        const u = row.original
-        return (
-          <div className="flex items-center justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Change role"
-                  onClick={() => {
-                    setRoleTarget(u)
-                    setNewRole(u.role)
-                    setRoleOpen(true)
-                  }}
-                  className="text-brand-500 hover:bg-brand-50 hover:text-brand-600 dark:text-brand-300 dark:hover:bg-brand-500/10"
-                >
-                  <UserCog className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Change role</TooltipContent>
-            </Tooltip>
-          </div>
-        )
-      },
-    },
+    roleAction,
   ]
 
   /* ── Columns: all users overview ───── */
@@ -359,6 +368,7 @@ export default function AccessControlPage() {
       header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
       cell: ({ row }) => <RoleBadge role={row.original.role} />,
     },
+    roleAction,
   ]
 
   return (
@@ -508,7 +518,13 @@ export default function AccessControlPage() {
               <Button variant="outline" onClick={() => setRoleOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={changeRole}>Save Role</Button>
+              <Button
+                onClick={changeRole}
+                disabled={savingRole || !newRole || newRole === roleTarget?.role}
+              >
+                {savingRole && <Loader2 className="h-4 w-4 animate-spin" />}
+                {savingRole ? "Saving..." : "Save Role"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
