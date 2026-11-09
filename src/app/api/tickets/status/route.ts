@@ -48,12 +48,26 @@ export async function POST(req: Request) {
     const engineerName = me.full_name?.trim() || me.email || "Engineer"
     let emailComment: string | null = comment || null
 
-    if (status === "closed") {
-      const { error } = await db
+    // Only applies while this person is still the assignee and the status is
+    // unchanged — a transfer or another update in between makes it a 409.
+    const guardedUpdate = (fields: Record<string, unknown>) =>
+      db
         .from("tickets")
-        .update({ status: "closed", closed_comment: comment || null })
+        .update(fields)
         .eq("id", ticketId)
+        .eq("assignee", me.id)
+        .eq("status", ticket.status)
+        .select("id")
+    const changedMeanwhile = () =>
+      jsonError("The ticket was changed by someone else. Refresh and try again.", 409)
+
+    if (status === "closed") {
+      const { data: updated, error } = await guardedUpdate({
+        status: "closed",
+        closed_comment: comment || null,
+      })
       if (error) throw error
+      if (!updated || updated.length === 0) return changedMeanwhile()
 
       await db.from("ticket_activity").insert({
         ticket_id: ticketId,
@@ -68,17 +82,15 @@ export async function POST(req: Request) {
         : 24
       const startedAt = new Date()
 
-      const { error } = await db
-        .from("tickets")
-        .update({
-          status: "hold",
-          hold_comment: comment,
-          hold_duration_hours: hours,
-          hold_started_at: startedAt.toISOString(),
-          hold_until: new Date(startedAt.getTime() + hours * 60 * 60 * 1000).toISOString(),
-        })
-        .eq("id", ticketId)
+      const { data: updated, error } = await guardedUpdate({
+        status: "hold",
+        hold_comment: comment,
+        hold_duration_hours: hours,
+        hold_started_at: startedAt.toISOString(),
+        hold_until: new Date(startedAt.getTime() + hours * 60 * 60 * 1000).toISOString(),
+      })
       if (error) throw error
+      if (!updated || updated.length === 0) return changedMeanwhile()
 
       await db.from("ticket_activity").insert({
         ticket_id: ticketId,

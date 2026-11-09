@@ -39,7 +39,6 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ActivityItem } from "./TicketActivityTrail"
-import { sendNotification, sendEmailNotification } from "@/lib/notify"
 
 /* -----------------------------------
    Types
@@ -66,7 +65,8 @@ type Props = {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   currentUser: Profile
   otherUser: Profile
-  onSend: (message: string) => Promise<void>
+  /** Save the message; `onlineUserIds` are the people viewing this ticket now. Return false if it failed. */
+  onSend: (message: string, onlineUserIds: string[]) => Promise<boolean | void>
   activityItems?: ActivityItem[]
   /** Show the conversation without the message box (people not working on the ticket) */
   readOnly?: boolean
@@ -114,7 +114,6 @@ const ACTIVITY_TONE: Record<string, BadgeTone> = {
 ----------------------------------- */
 export default function TicketChat({
   ticketId,
-  ticketSubject,
   messages,
   setMessages,
   currentUser,
@@ -190,40 +189,10 @@ export default function TicketChat({
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-    await onSend(msg)
-
-    /* Notify the other party only if they are NOT currently
-       viewing this ticket (presence-based deduplication).
-       No other party yet (unassigned ticket) → nobody to notify. */
-    if (otherUser.id && otherUser.id !== currentUser.id && !isOtherOnline) {
-      await sendNotification({
-        user_id: otherUser.id,
-        actor_id: currentUser.id,
-        ticket_id: ticketId,
-        type: "message",
-        message: "sent you a message",
-      })
-
-      /* Also send email when user is offline */
-      const { data: recipientData } = await supabase
-        .from("users")
-        .select("email, name:full_name")
-        .eq("id", otherUser.id)
-        .single()
-
-      if (recipientData?.email) {
-        sendEmailNotification({
-          recipient_email: recipientData.email,
-          recipient_name: recipientData.name ?? otherUser.name,
-          actor_name: currentUser.name,
-          ticket_id: ticketId,
-          ticket_subject: ticketSubject ?? "Support Ticket",
-          action: "message",
-          comment: msg,
-          audience: otherUser.role === "engineer" ? "staff" : "requester",
-        })
-      }
-    }
+    // The server saves the message and notifies the other side (requester <->
+    // current assignee) unless they are viewing this ticket right now.
+    const sent = await onSend(msg, onlineUsers)
+    if (sent === false) setText((current) => current || msg) // keep the text so it isn't lost
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

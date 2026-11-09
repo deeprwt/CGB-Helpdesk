@@ -4,7 +4,7 @@ import * as React from "react"
 import { Label, Pie, PieChart } from "recharts"
 import { ChartPie } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
-import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
+import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 import {
   Card,
@@ -129,7 +129,7 @@ export function PieChartTable() {
       const fromDate = getFromDate(range)
 
       // Scope aggregate counts to user's accessible org(s)
-      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", profile.role)
+      const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", profile.role)
       const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
       if (orgUserIds.length === 0) {

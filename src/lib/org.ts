@@ -19,13 +19,18 @@ export async function getOrgUserIds(
 ): Promise<string[]> {
   if (!domain) return []
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("id")
-    .ilike("email", `%@${domain}`)
+  // Paged: a plain select stops at Supabase's max rows (1000)
+  const { data, error } = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase
+      .from("users")
+      .select("id")
+      .ilike("email", `%@${domain}`)
+      .order("id")
+      .range(from, to)
+  )
 
-  if (error) return []
-  return (data ?? []).map((u: { id: string }) => u.id)
+  if (error && data.length === 0) return []
+  return data.map((u) => u.id)
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -136,13 +141,20 @@ export async function getOrgUserIdsByDomains(
 
   const orFilter = domains.map((d) => `email.ilike.%@${d}`).join(",")
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("id")
-    .or(orFilter)
+  // Paged: a plain select stops at Supabase's max rows (1000)
+  const { data, error } = await fetchAllRows<{ id: string }>((from, to) =>
+    supabase.from("users").select("id").or(orFilter).order("id").range(from, to)
+  )
 
-  if (error) return []
-  return (data ?? []).map((u: { id: string }) => u.id)
+  if (error && data.length === 0) return []
+  return data.map((u) => u.id)
+}
+
+/** Splits a list into chunks, e.g. user IDs for `.in()` filters that must keep the URL short. */
+export function chunkList<T>(items: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
 }
 
 /**

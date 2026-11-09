@@ -3,7 +3,7 @@
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
-import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
+import { chunkList, getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 import { DataTable, DATA_TABLE_ALL_ROWS } from "@/components/ui/data-table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -18,6 +18,10 @@ import { timeAgo, STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import { getInitials } from "@/hooks/useCurrentUser"
 
 const DEFAULT_PAGE_SIZE = 50
+/** Requester IDs per request; keeps the URL PostgREST reads short */
+const ID_CHUNK = 150
+/** PostgREST hands back at most this many rows per request */
+const MAX_ROWS = 1000
 
 type Tab = "queue" | "mytask" | "raised" | "all"
 
@@ -77,24 +81,37 @@ export default function EngineerTicketTable() {
   const [total, setTotal] = React.useState<number | undefined>(undefined)
   const [loading, setLoading] = React.useState(true)
 
-  const loadTickets = async () => {
+  // Reload for the current tab/filters (set by the effect below, so a reload
+  // never runs with an older tab's settings)
+  const reloadRef = React.useRef<() => void>(() => {})
+
+  /** `isActive` turns false once the tab/filters change, so a slow response for
+   *  an old tab can never overwrite the rows of the tab now showing. */
+  const loadTickets = async (isActive: () => boolean) => {
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
-    if (!user) return
+    if (!user || !isActive()) return
     setMe(user.id)
 
-    const from = (page - 1) * pageSize
-    const to = from + pageSize - 1
+    const offset = (page - 1) * pageSize
+    const showAll = pageSize === DATA_TABLE_ALL_ROWS
 
-    let query = supabase
-      .from("tickets")
-      .select("*", { count: "exact" })
-      .order("created_at", { ascending: false })
+    const base = () => {
+      let q = supabase
+        .from("tickets")
+        .select("*", { count: "exact" })
+        .order("created_at", { ascending: false })
+      if (status !== "all") q = q.eq("status", status)
+      if (category !== "all") q = q.eq("category", category)
+      if (search) q = q.ilike("subject", `%${search}%`)
+      return q
+    }
 
-    // "All" skips the range; Supabase's own max-rows setting still caps the response
-    if (pageSize !== DATA_TABLE_ALL_ROWS) query = query.range(from, to)
+    let rows: Ticket[] = []
+    let count = 0
+    let failed = false
 
     if (tab === "queue" || tab === "all") {
       // Queue / All: tickets raised by anyone in the organisation(s) this person looks after
@@ -104,63 +121,89 @@ export default function EngineerTicketTable() {
         .eq("id", user.id)
         .single()
       const userRole = roleData?.role ?? "engineer"
-      const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", userRole)
-      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
+      const scoped = (q: ReturnType<typeof base>) => (tab === "queue" ? q.is("assignee", null) : q)
 
-      if (orgUserIds.length === 0) {
-        setTickets([])
-        setHasNext(false)
-        setTotal(0)
-        return
+      if (userRole === "superadmin") {
+        // Super admins look after every organisation: no requester filter needed
+        let q = scoped(base())
+        // "All" skips the range; Supabase's own max-rows setting still caps the response
+        if (!showAll) q = q.range(offset, offset + pageSize - 1)
+        const { data, count: c, error } = await q
+        failed = !!error
+        rows = (data ?? []) as Ticket[]
+        count = c ?? 0
+      } else {
+        const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", userRole)
+        const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
+        if (!isActive()) return
+
+        // The requester filter goes in the request URL, so it is sent in batches
+        // of IDs. Each batch returns its newest offset+pageSize rows; merged and
+        // sorted, that gives the exact page (as AskMira's ticket lists do).
+        const want = showAll ? MAX_ROWS : Math.min(offset + pageSize, MAX_ROWS)
+        const parts = await Promise.all(
+          chunkList(orgUserIds, ID_CHUNK).map((batch) =>
+            scoped(base().in("requester_id", batch)).limit(want)
+          )
+        )
+        failed = parts.some((p) => !!p.error)
+        count = parts.reduce((sum, p) => sum + (p.count ?? 0), 0)
+        const merged = parts
+          .flatMap((p) => (p.data ?? []) as Ticket[])
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        rows = showAll ? merged : merged.slice(offset, offset + pageSize)
       }
-
-      query = query.in("requester_id", orgUserIds)
-      if (tab === "queue") query = query.is("assignee", null)
-    } else if (tab === "mytask") {
-      // My tasks: tickets assigned to this specific engineer
-      query = query.eq("assignee", user.id)
     } else {
-      // Raised by me: tickets this person raised for themselves
-      query = query.eq("requester_id", user.id)
+      let q =
+        tab === "mytask"
+          ? base().eq("assignee", user.id) // My tasks: tickets assigned to this engineer
+          : base().eq("requester_id", user.id) // Raised by me: tickets this person raised
+      if (!showAll) q = q.range(offset, offset + pageSize - 1)
+      const { data, count: c, error } = await q
+      failed = !!error
+      rows = (data ?? []) as Ticket[]
+      count = c ?? 0
     }
 
-    if (status !== "all") query = query.eq("status", status)
-    if (category !== "all") query = query.eq("category", category)
-    if (search) query = query.ilike("subject", `%${search}%`)
+    if (!isActive()) return
 
-    const { data, count, error } = await query
-
-    if (error) {
+    if (failed) {
       toast.error("Failed to load tickets")
+      // Don't leave the previous tab's rows on screen under this tab's title
+      setTickets([])
+      setHasNext(false)
+      setTotal(0)
       return
     }
 
-    const rows = (data ?? []) as Ticket[]
     setTickets(rows)
-    setHasNext((count ?? 0) > page * pageSize)
-    setTotal(count ?? undefined)
+    setHasNext(count > page * pageSize)
+    setTotal(count)
 
     /* Names of the engineers working on these tickets */
     const assigneeIds = [...new Set(rows.map((t) => t.assignee).filter((a): a is string => !!a))]
+    let nameMap: Record<string, string> = {}
     if (assigneeIds.length > 0) {
       const { data: people } = await supabase
         .from("users")
         .select("id, full_name")
         .in("id", assigneeIds)
-      setAssigneeNames(
-        Object.fromEntries(
-          (people ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name ?? "Engineer"])
-        )
+      nameMap = Object.fromEntries(
+        (people ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name ?? "Engineer"])
       )
-    } else {
-      setAssigneeNames({})
     }
+    if (isActive()) setAssigneeNames(nameMap)
   }
 
   React.useEffect(() => {
     let active = true
+    const isActive = () => active
+    reloadRef.current = () => {
+      loadTickets(isActive)
+    }
+
     setLoading(true)
-    loadTickets().finally(() => {
+    loadTickets(isActive).finally(() => {
       if (active) setLoading(false)
     })
 
@@ -169,7 +212,9 @@ export default function EngineerTicketTable() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tickets" },
-        loadTickets
+        () => {
+          loadTickets(isActive)
+        }
       )
       .subscribe()
 
@@ -208,7 +253,7 @@ export default function EngineerTicketTable() {
       toast.error("Failed to acquire ticket")
     } finally {
       setAcquiring(null)
-      loadTickets()
+      reloadRef.current()
     }
   }
 
@@ -383,7 +428,7 @@ export default function EngineerTicketTable() {
             setPage(1)
           }}
         >
-          <TabsList className="flex-wrap">
+          <TabsList className="h-auto flex-wrap">
             <TabsTrigger value="queue">
               <Inbox />
               Queue

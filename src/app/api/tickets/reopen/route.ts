@@ -53,6 +53,10 @@ export async function POST(req: Request) {
       }
     }
 
+    // Updates below only apply if the status is unchanged since we read it
+    const changedMeanwhile = () =>
+      jsonError("The ticket was changed by someone else. Refresh and try again.", 409)
+
     /* 2. Calculate new SLA resolution deadline */
     // If coming from hold, account for paused time
     let slaResolutionAt = ticket.sla_resolution_at
@@ -66,7 +70,7 @@ export async function POST(req: Request) {
         slaResolutionAt = new Date(originalDeadline + pausedMs).toISOString()
       }
 
-      const { error } = await db
+      const { data: updated, error } = await db
         .from("tickets")
         .update({
           status: "open",
@@ -79,12 +83,15 @@ export async function POST(req: Request) {
           sla_resolution_breached: false,
         })
         .eq("id", ticket_id)
+        .eq("status", ticket.status)
+        .select("id")
       if (error) throw error
+      if (!updated || updated.length === 0) return changedMeanwhile()
     } else {
       // Reopening from closed — reset resolution SLA (6 hours from now)
       slaResolutionAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
 
-      const { error } = await db
+      const { data: updated, error } = await db
         .from("tickets")
         .update({
           status: "open",
@@ -97,7 +104,10 @@ export async function POST(req: Request) {
           sla_resolution_breached: false,
         })
         .eq("id", ticket_id)
+        .eq("status", ticket.status)
+        .select("id")
       if (error) throw error
+      if (!updated || updated.length === 0) return changedMeanwhile()
     }
 
     /* 3. Log activity */

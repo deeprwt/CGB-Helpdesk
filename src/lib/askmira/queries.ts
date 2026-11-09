@@ -9,9 +9,9 @@
 //
 // * Its IT team (engineers, admins, super admins) see what its own screens show
 //   them: every organization's assets, as on the Assets page, and the tickets
-//   of the organizations they look after (lib/org.ts getUserAccessibleDomains:
-//   every organization for a super admin, those granted under Access Control
-//   for anyone else, otherwise their own).
+//   of the organizations they look after (lib/org.ts getStaffWorkDomains:
+//   every organization for a super admin; for anyone else their own company
+//   plus those granted under Access Control).
 // * HR in AskMira (actor role "admin") who are not on the IT team read their
 //   own company — the connected organization — and nothing else.
 // * Everyone else: their own tickets and the assets they hold.
@@ -19,7 +19,7 @@
 //   tickets  scope "mine"      tickets they raised
 //            scope "assigned"  tickets assigned to them                 IT team
 //            scope "queue"     unassigned tickets of their companies    IT team
-//            scope "company"   all tickets of their companies           IT admins, HR
+//            scope "company"   all tickets of their companies           IT team, HR
 //   ticket   one ticket and its conversation, if they may open it
 //   overview counts for the scopes above that are theirs
 //   assets   scope "mine"      what is assigned to them now
@@ -28,7 +28,7 @@
 //
 // Lists take `limit` (at most 100) and `offset`, for paging.
 
-import { buildEmailDomainFilter, getUserAccessibleDomains } from "@/lib/org"
+import { buildEmailDomainFilter, getStaffWorkDomains } from "@/lib/org"
 import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
 import {
   BRAND,
@@ -38,7 +38,6 @@ import {
   db,
   domainOf,
   httpError,
-  isAdmin,
   isStaff,
   searchText,
   shortRef,
@@ -123,8 +122,8 @@ async function names(ids: (string | null | undefined)[]) {
 async function workDomains(ctx: Ctx): Promise<string[]> {
   const { me, org } = ctx
   if (isStaff(me)) {
-    const domains = await getUserAccessibleDomains(db(), me.id, me.email, me.role)
-    return [...new Set(domains.map((d) => d.toLowerCase()).filter(Boolean))]
+    // Same rule as the helpdesk: own company plus granted ones (all for super admins)
+    return getStaffWorkDomains(db(), me.id, me.email, me.role)
   }
   return ctx.hr ? [org.domain] : []
 }
@@ -147,8 +146,8 @@ function ticketScope(ctx: Ctx, value: unknown) {
   if ((scope === "assigned" || scope === "queue") && !isStaff(me)) {
     throw httpError(403, `Only ${BRAND}'s IT team has a ticket queue.`)
   }
-  if (scope === "company" && !isAdmin(me) && !ctx.hr) {
-    throw httpError(403, `Only HR and ${BRAND} admins see all of a company's tickets.`)
+  if (scope === "company" && !isStaff(me) && !ctx.hr) {
+    throw httpError(403, `Only HR and ${BRAND}'s IT team see all of a company's tickets.`)
   }
   return scope
 }
@@ -259,7 +258,7 @@ async function overviewAnswer(ctx: Ctx) {
     answer.assigned = await byStatus(ctx, "assigned")
     answer.queue = await countIn(ctx, { scope: "queue" })
   }
-  if (isAdmin(me) || ctx.hr) answer.company = await byStatus(ctx, "company")
+  if (isStaff(me) || ctx.hr) answer.company = await byStatus(ctx, "company")
   const { count } = await db()
     .from("asset_assignments")
     .select("id", { count: "exact", head: true })

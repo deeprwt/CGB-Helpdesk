@@ -46,7 +46,7 @@ import TicketActivityTrail, {
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
 import RequesterTicketHistory from "@/components/tickets/ticket-details/RequesterTicketHistory";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
-import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org";
+import { extractOrgDomain, getStaffWorkDomains } from "@/lib/org";
 import { isStaffRole, ticketPermissions } from "@/lib/ticket-access";
 import { toast } from "sonner";
 
@@ -214,10 +214,14 @@ async function checkTicketAccess(
   if (role === "engineer" || role === "admin") {
     if (ticket.assignee === userId) return true;
     // The IT team can VIEW any ticket of the organisations they look after,
-    // including ones assigned to another engineer (read only)
-    const domains = await getStaffWorkDomains(supabase, userId, email, role);
-    const orgUserIds = await getOrgUserIdsByDomains(supabase, domains);
-    return orgUserIds.includes(ticket.requester_id);
+    // including ones assigned to another engineer (read only). Compare the
+    // requester's domain directly — same rule as the API routes.
+    const [domains, { data: requester }] = await Promise.all([
+      getStaffWorkDomains(supabase, userId, email, role),
+      supabase.from("users").select("email").eq("id", ticket.requester_id).maybeSingle(),
+    ]);
+    const requesterDomain = extractOrgDomain(requester?.email ?? "");
+    return !!requesterDomain && domains.includes(requesterDomain);
   }
 
   return false;
@@ -407,17 +411,43 @@ export default function TicketDetailsPage() {
     loadData();
   }, [loadData]);
 
-  /* ── Load available engineers for transfer ── */
-  const loadEngineers = async () => {
-    const { data } = await supabase
-      .from("users")
-      .select("id, name:full_name, email")
-      .in("role", ["engineer", "admin"])
-      .order("full_name");
+  /* ── Stay current when someone else acquires, transfers or closes this
+        ticket, so buttons, view-only state and the chat partner are right ── */
+  React.useEffect(() => {
+    const channel = supabase
+      .channel(`ticket-row-${id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "tickets", filter: `id=eq.${id}` },
+        () => {
+          loadData();
+        }
+      )
+      .subscribe();
 
-    setEngineers(
-      (data ?? []).filter((e: EngineerOption) => e.id !== ticket?.assignee)
-    );
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, loadData]);
+
+  /* ── Load who this ticket can be transferred to (people who look after
+        the requester's organisation; worked out on the server) ── */
+  const loadEngineers = async () => {
+    setEngineers([]);
+    if (!ticket) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    try {
+      const res = await fetch(`/api/tickets/reassign?ticket_id=${encodeURIComponent(ticket.id)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const result = await res.json().catch(() => null);
+      if (res.ok) setEngineers((result?.engineers ?? []) as EngineerOption[]);
+      else toast.error(result?.error ?? "Couldn't load engineers");
+    } catch {
+      toast.error("Couldn't load engineers");
+    }
   };
 
   /* ── Acquire (unassigned ticket) ── */
@@ -753,14 +783,21 @@ export default function TicketDetailsPage() {
             activityItems={activityItems}
             readOnly={!can.canChat}
             readOnlyMessage={chatReadOnlyMessage}
-            onSend={async (text) => {
-              if (!can.canChat) return;
-              await supabase.from("ticket_messages").insert({
+            onSend={async (text, onlineUserIds) => {
+              if (!can.canChat) return false;
+              // The server checks this person may still write (requester or the
+              // CURRENT assignee) and notifies the other side.
+              const { ok, error } = await postJson("/api/tickets/message", {
                 ticket_id: id,
-                sender_id: userId,
-                sender_role: can.isRequester ? "user" : "engineer",
                 message: text,
+                online_user_ids: onlineUserIds,
               });
+              if (!ok) {
+                toast.error(error ?? "Failed to send message");
+                await loadData(); // e.g. the ticket was transferred meanwhile
+                return false;
+              }
+              return true;
             }}
           />
         </div>

@@ -12,7 +12,7 @@ import {
 import { StatCard, StatCardSkeleton, type StatTone } from "@/components/common/stat-card"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabaseClient"
-import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
+import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 type Role = "user" | "engineer" | "admin" | "superadmin"
 
@@ -108,7 +108,7 @@ export default function TicketOverviewCards() {
          ENGINEER / ADMIN STATS — scoped to this org only
       ---------------------------- */
       if (role === "engineer" || role === "admin" || role === "superadmin") {
-        const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", role)
+        const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", role)
         const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
         if (orgUserIds.length === 0) {

@@ -8,6 +8,7 @@ import {
 } from "@/lib/ticket-server"
 import { isAdminRole, isStaffRole, ticketPermissions } from "@/lib/ticket-access"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
+import { loadTicketStaffPicker } from "@/lib/org"
 
 export const runtime = "nodejs"
 
@@ -46,12 +47,13 @@ export async function POST(req: Request) {
       )
     }
 
+    const { data: requester } = await db
+      .from("users")
+      .select("email")
+      .eq("id", ticket.requester_id)
+      .maybeSingle()
+
     if (isAdminRole(me.role) && ticket.assignee !== me.id) {
-      const { data: requester } = await db
-        .from("users")
-        .select("email")
-        .eq("id", ticket.requester_id)
-        .maybeSingle()
       if (!(await staffCoversRequester(db, me, requester?.email))) {
         return jsonError("This ticket belongs to an organisation you don't look after", 403)
       }
@@ -65,21 +67,27 @@ export async function POST(req: Request) {
     if (!newEngineer || !isStaffRole(newEngineer.role)) {
       return jsonError("Tickets can only be transferred to an engineer or admin", 400)
     }
+    // The new engineer must look after the requester's organisation (no cross-tenant hand-offs)
+    if (!(await staffCoversRequester(db, newEngineer, requester?.email))) {
+      return jsonError("That engineer doesn't look after this ticket's organisation", 400)
+    }
 
-    const previousAssignee: string | null = ticket.assignee
+    const previousAssignee: string = ticket.assignee
 
-    /* 2. Update ticket assignee (only if nobody changed it meanwhile) */
-    let update = db
+    /* 2. Update ticket assignee — only if nobody changed the assignee or status
+          meanwhile. A ticket on hold stays on hold (the new engineer resumes it,
+          which credits the paused SLA time); otherwise it becomes open. */
+    const { data: updated, error: updateError } = await db
       .from("tickets")
       .update({
         assignee: new_engineer_id,
         assigned_at: new Date().toISOString(),
-        status: "open",
+        ...(ticket.status === "hold" ? {} : { status: "open" }),
       })
       .eq("id", ticket_id)
-    update = previousAssignee ? update.eq("assignee", previousAssignee) : update.is("assignee", null)
-
-    const { data: updated, error: updateError } = await update.select("id")
+      .eq("assignee", previousAssignee)
+      .eq("status", ticket.status)
+      .select("id")
     if (updateError) throw updateError
     if (!updated || updated.length === 0) {
       return jsonError("The ticket was changed by someone else. Refresh and try again.", 409)
@@ -132,6 +140,54 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error("Reassign failed:", err)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+/**
+ * GET /api/tickets/reassign?ticket_id=…
+ * Who this ticket can be transferred to: engineers and admins who look after
+ * the requester's organisation (the same rule the POST enforces).
+ */
+export async function GET(req: Request) {
+  try {
+    const authUser = await getRequestUser(req)
+    if (!authUser) return jsonError("Unauthorized", 401)
+
+    const ticketId = new URL(req.url).searchParams.get("ticket_id")
+    if (!ticketId) return jsonError("Missing ticket_id", 400)
+
+    const db = serviceClient()
+    const me = await loadPerson(db, authUser.id)
+    if (!me) return jsonError("Unauthorized", 401)
+
+    const { data: ticket } = await db
+      .from("tickets")
+      .select("id, requester_id, assignee, status")
+      .eq("id", ticketId)
+      .maybeSingle()
+    if (!ticket) return jsonError("Ticket not found", 404)
+
+    const { data: requester } = await db
+      .from("users")
+      .select("email")
+      .eq("id", ticket.requester_id)
+      .maybeSingle()
+
+    const can = ticketPermissions(me, ticket)
+    if (!can.canTransfer || (!can.isAssignee && !(await staffCoversRequester(db, me, requester?.email)))) {
+      return jsonError("Only the assigned engineer or an admin can transfer this ticket", 403)
+    }
+
+    const pick = await loadTicketStaffPicker(db, ["engineer", "admin"])
+    const engineers = pick(requester?.email)
+      .filter((s) => s.id !== ticket.assignee)
+      .map((s) => ({ id: s.id, name: s.name?.trim() || s.email || "Engineer", email: s.email ?? "" }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    return NextResponse.json({ engineers })
+  } catch (err) {
+    console.error("Transfer candidates failed:", err)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
