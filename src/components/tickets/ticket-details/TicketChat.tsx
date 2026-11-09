@@ -33,6 +33,7 @@ import {
   Paperclip,
   ChevronDown,
   History,
+  Lock,
   MessageSquare,
   Users,
 } from "lucide-react"
@@ -67,6 +68,11 @@ type Props = {
   otherUser: Profile
   onSend: (message: string) => Promise<void>
   activityItems?: ActivityItem[]
+  /** Show the conversation without the message box (people not working on the ticket) */
+  readOnly?: boolean
+  readOnlyMessage?: React.ReactNode
+  /** Everyone who wrote on the ticket, by user id, so each message shows its real sender */
+  participants?: Record<string, Profile>
 }
 
 /* -----------------------------------
@@ -115,6 +121,9 @@ export default function TicketChat({
   otherUser,
   onSend,
   activityItems = [],
+  readOnly = false,
+  readOnlyMessage,
+  participants,
 }: Props) {
   const [text, setText] = React.useState("")
   const [onlineUsers, setOnlineUsers] = React.useState<string[]>([])
@@ -175,7 +184,7 @@ export default function TicketChat({
   const isOtherOnline = onlineUsers.includes(otherUser.id)
 
   const handleSend = async () => {
-    if (!text.trim()) return
+    if (readOnly || !text.trim()) return
     const msg = text
     setText("")
     if (textareaRef.current) {
@@ -184,8 +193,9 @@ export default function TicketChat({
     await onSend(msg)
 
     /* Notify the other party only if they are NOT currently
-       viewing this ticket (presence-based deduplication) */
-    if (!isOtherOnline) {
+       viewing this ticket (presence-based deduplication).
+       No other party yet (unassigned ticket) → nobody to notify. */
+    if (otherUser.id && otherUser.id !== currentUser.id && !isOtherOnline) {
       await sendNotification({
         user_id: otherUser.id,
         actor_id: currentUser.id,
@@ -210,6 +220,7 @@ export default function TicketChat({
           ticket_subject: ticketSubject ?? "Support Ticket",
           action: "message",
           comment: msg,
+          audience: otherUser.role === "engineer" ? "staff" : "requester",
         })
       }
     }
@@ -371,7 +382,17 @@ export default function TicketChat({
 
                 {dayMessages.map((msg, idx) => {
                   const isMine = msg.sender_id === currentUser.id
-                  const profile = isMine ? currentUser : otherUser
+                  const profile: Profile = isMine
+                    ? currentUser
+                    : participants?.[msg.sender_id] ??
+                      (msg.sender_id === otherUser.id
+                        ? otherUser
+                        : {
+                            id: msg.sender_id,
+                            name: msg.sender_role === "engineer" ? "Support Engineer" : "Requester",
+                            avatar_url: null,
+                            role: msg.sender_role,
+                          })
                   const prevMsg = dayMessages[idx - 1]
                   const nextMsg = dayMessages[idx + 1]
                   const isFirstInGroup =
@@ -449,6 +470,14 @@ export default function TicketChat({
       </CardContent>
 
       {/* ── Input ──────────────────────── */}
+      {readOnly ? (
+        <CardFooter className="border-t border-gray-100 py-4 dark:border-white/10 [.border-t]:pt-4">
+          <div className="flex w-full items-center gap-2 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 px-4 py-3 text-xs text-gray-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-gray-400">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>{readOnlyMessage ?? "You can read this conversation but not reply."}</span>
+          </div>
+        </CardFooter>
+      ) : (
       <CardFooter className="flex-col items-stretch gap-1.5 border-t border-gray-100 py-4 dark:border-white/10 [.border-t]:pt-4">
         <div className="flex items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50/70 p-2 transition-colors focus-within:border-brand-300 focus-within:ring-[3px] focus-within:ring-brand-500/10 dark:border-white/10 dark:bg-white/[0.03] dark:focus-within:border-brand-500/40">
           <Tooltip>
@@ -498,6 +527,7 @@ export default function TicketChat({
           Enter to send · Shift+Enter for new line
         </p>
       </CardFooter>
+      )}
     </Card>
   )
 }

@@ -1,7 +1,6 @@
 import { NextResponse, after } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { sendTicketEmail } from "@/lib/email"
-import { getTicketAdmins } from "@/lib/org"
+import { notifyTicketEvent } from "@/lib/ticket-notify"
 
 export const runtime = "nodejs"
 
@@ -128,71 +127,18 @@ export async function POST(req: Request) {
     })
 
     /* -----------------------------------
-       5.5️⃣ Notify admins & requester about new ticket.
+       5.5️⃣ Requester gets a confirmation email with the ticket details;
+       the IT team of the requester's organization gets a web notification.
        after() runs once the response is sent, so the user is redirected
        straight away; Vercel keeps the function alive until it finishes.
     ----------------------------------- */
-    const requesterName =
-      requester.full_name?.trim() ||
-      formData.get("requester_name")?.toString() ||
-      "User"
-    const ticketSubject = formData.get("subject")?.toString() ?? ""
-    const ticketShortId = ticket.id.slice(0, 8).toUpperCase()
-
-    after(async () => {
-      const sends: Promise<void>[] = []
-
-      // Email confirmation to requester
-      if (requester.email) {
-        sends.push(
-          sendTicketEmail({
-            to: requester.email,
-            recipientName: requesterName,
-            actorName: requesterName,
-            ticketId: ticket.id,
-            ticketSubject,
-            action: "created",
-          })
-        )
-      }
-
-      // Notify the admins responsible for the requester's organization
-      const admins = await getTicketAdmins(supabaseAdmin, requester.email)
-
-      for (const admin of admins) {
-        if (admin.id === requesterId) continue
-
-        // In-app notification
-        await supabaseAdmin.from("notifications").insert({
-          user_id: admin.id,
-          actor_id: requesterId,
-          ticket_id: ticket.id,
-          type: "status_changed",
-          message: `New ticket #${ticketShortId} raised by ${requesterName}`,
-          is_read: false,
-        })
-
-        // Email to admin
-        if (admin.email) {
-          sends.push(
-            sendTicketEmail({
-              to: admin.email,
-              recipientName: admin.name ?? "Admin",
-              actorName: requesterName,
-              ticketId: ticket.id,
-              ticketSubject,
-              action: "created",
-            })
-          )
-        }
-      }
-
-      for (const result of await Promise.allSettled(sends)) {
-        if (result.status === "rejected") {
-          console.error("Ticket email failed:", result.reason)
-        }
-      }
-    })
+    after(() =>
+      notifyTicketEvent(supabaseAdmin, {
+        event: "created",
+        ticket,
+        actorId: user.id,
+      }).catch((err) => console.error("New ticket notifications failed:", err))
+    )
 
     /* -----------------------------------
        6️⃣ Link asset (if provided)

@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
 import { PageHeader, type PageHeaderMetaItem } from "@/components/common/page-header";
 import { StatusBadge } from "@/components/common/status-badge";
 import { statusLabel } from "@/lib/ticket-utils";
@@ -28,8 +29,10 @@ import {
   ArrowLeft,
   RotateCcw,
   UserPlus,
+  UserCheck,
   AlertTriangle,
   CheckCircle2,
+  Eye,
   Loader2,
   PauseCircle,
   Ticket as TicketIcon,
@@ -41,10 +44,10 @@ import TicketActivityTrail, {
   ActivityItem,
   ActivityStatus,
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
+import RequesterTicketHistory from "@/components/tickets/ticket-details/RequesterTicketHistory";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
-import { sendNotification, sendEmailNotification } from "@/lib/notify";
-import { logActivity } from "@/lib/activity";
-import { getUserAccessibleDomains, getOrgUserIdsByDomains, getTicketAdmins } from "@/lib/org";
+import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org";
+import { isStaffRole, ticketPermissions } from "@/lib/ticket-access";
 import { toast } from "sonner";
 
 /* -----------------------------------
@@ -194,7 +197,8 @@ const ACTIVITY_ACTION_STATUS: Record<string, ActivityStatus> = {
 };
 
 /* -----------------------------------
-   Access control
+   Access control (who may OPEN the page).
+   What they may DO is decided by ticketPermissions().
 ----------------------------------- */
 async function checkTicketAccess(
   role: Role,
@@ -203,19 +207,41 @@ async function checkTicketAccess(
   ticket: Ticket
 ): Promise<boolean> {
   if (role === "superadmin") return true;
-  if (role === "user") return ticket.requester_id === userId;
+  // Everyone can open the tickets they raised, whatever their role
+  if (ticket.requester_id === userId) return true;
+  if (role === "user") return false;
 
   if (role === "engineer" || role === "admin") {
     if (ticket.assignee === userId) return true;
-    if (ticket.assignee === null) {
-      const domains = await getUserAccessibleDomains(supabase, userId, email, role);
-      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains);
-      return orgUserIds.includes(ticket.requester_id);
-    }
-    return false;
+    // The IT team can VIEW any ticket of the organisations they look after,
+    // including ones assigned to another engineer (read only)
+    const domains = await getStaffWorkDomains(supabase, userId, email, role);
+    const orgUserIds = await getOrgUserIdsByDomains(supabase, domains);
+    return orgUserIds.includes(ticket.requester_id);
   }
 
   return false;
+}
+
+async function postJson(url: string, body: Record<string, unknown>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { ok: false, error: "Your session has expired. Sign in again." };
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return { ok: true, error: null };
+    const result = await res.json().catch(() => null);
+    return { ok: false, error: (result?.error as string | undefined) ?? null };
+  } catch {
+    return { ok: false, error: null };
+  }
 }
 
 /* -----------------------------------
@@ -236,11 +262,15 @@ export default function TicketDetailsPage() {
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [selectedEngineerId, setSelectedEngineerId] = React.useState<string>("");
   const [engineers, setEngineers] = React.useState<EngineerOption[]>([]);
+  const [reassignNote, setReassignNote] = React.useState("");
   const [reassignLoading, setReassignLoading] = React.useState(false);
   const [reopenLoading, setReopenLoading] = React.useState(false);
+  const [acquireLoading, setAcquireLoading] = React.useState(false);
 
-  const [requesterEmail, setRequesterEmail] = React.useState<string | null>(null);
-  const [engineerName, setEngineerName] = React.useState<string>("Support Engineer");
+  // Display names for the chat and the header
+  const [myName, setMyName] = React.useState<string>("You");
+  const [assigneeName, setAssigneeName] = React.useState<string | null>(null);
+  const [peopleNames, setPeopleNames] = React.useState<Record<string, string | null>>({});
 
   // Assignment history & activity log from DB
   const [assignments, setAssignments] = React.useState<AssignmentRecord[]>([]);
@@ -346,15 +376,29 @@ export default function TicketDetailsPage() {
       setDbActivity([]);
     }
 
-    /* Fetch requester email & current user's name */
-    const [requesterInfo, engineerInfo] = await Promise.all([
-      supabase.from("users").select("email").eq("id", ticketData.requester_id).single(),
-      supabase.from("users").select("name:full_name").eq("id", user.id).single(),
-    ]);
-    // Always overwrite: keeping the previous value would send this ticket's
-    // close/hold emails to the requester of the last ticket viewed
-    setRequesterEmail(requesterInfo.data?.email ?? null);
-    setEngineerName(engineerInfo.data?.name ?? "Support Engineer");
+    /* Names for the chat and header: me, the requester, the engineer on the
+       ticket, and everyone who wrote in the conversation */
+    const peopleIds = [
+      ...new Set(
+        [
+          user.id,
+          ticketData.requester_id,
+          ticketData.assignee,
+          ...(chatData ?? []).map((m: Message) => m.sender_id),
+        ].filter((v): v is string => !!v)
+      ),
+    ];
+    const { data: peopleData } = await supabase
+      .from("users")
+      .select("id, name:full_name")
+      .in("id", peopleIds);
+    const names = new Map(
+      (peopleData ?? []).map((p: { id: string; name: string | null }) => [p.id, p.name])
+    );
+    // Always overwrite, so values never leak over from the last ticket viewed
+    setPeopleNames(Object.fromEntries(names));
+    setMyName(names.get(user.id) ?? "You");
+    setAssigneeName(ticketData.assignee ? names.get(ticketData.assignee) ?? "Engineer" : null);
 
     setLoading(false);
   }, [id, router]);
@@ -363,82 +407,65 @@ export default function TicketDetailsPage() {
     loadData();
   }, [loadData]);
 
-  /* ── Load available engineers for reassignment ── */
+  /* ── Load available engineers for transfer ── */
   const loadEngineers = async () => {
     const { data } = await supabase
       .from("users")
       .select("id, name:full_name, email")
-      .in("role", ["engineer", "admin"]);
+      .in("role", ["engineer", "admin"])
+      .order("full_name");
 
     setEngineers(
       (data ?? []).filter((e: EngineerOption) => e.id !== ticket?.assignee)
     );
   };
 
+  /* ── Acquire (unassigned ticket) ── */
+  const handleAcquire = async () => {
+    if (!ticket) return;
+    setAcquireLoading(true);
+    const { ok, error } = await postJson("/api/tickets/acquire", { ticket_id: ticket.id });
+    setAcquireLoading(false);
+
+    if (ok) toast.success("Ticket acquired. It is now in your tasks.");
+    else toast.error(error ?? "Failed to acquire ticket");
+    await loadData();
+  };
+
   /* ── Reopen ticket ── */
   const handleReopen = async () => {
     if (!ticket || !userId) return;
     setReopenLoading(true);
+    const { ok, error } = await postJson("/api/tickets/reopen", { ticket_id: ticket.id });
+    setReopenLoading(false);
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const res = await fetch("/api/tickets/reopen", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ ticket_id: ticket.id }),
-      });
-
-      if (res.ok) {
-        toast.success("Ticket reopened");
-        await loadData();
-      } else {
-        toast.error("Failed to reopen ticket");
-      }
-    } catch {
-      toast.error("Failed to reopen ticket");
-    } finally {
-      setReopenLoading(false);
+    if (ok) {
+      toast.success("Ticket reopened");
+      await loadData();
+    } else {
+      toast.error(error ?? "Failed to reopen ticket");
     }
   };
 
-  /* ── Reassign ticket ── */
+  /* ── Transfer / escalate ticket ── */
   const handleReassign = async () => {
     if (!ticket || !userId || !selectedEngineerId) return;
     setReassignLoading(true);
+    const { ok, error } = await postJson("/api/tickets/reassign", {
+      ticket_id: ticket.id,
+      new_engineer_id: selectedEngineerId,
+      comment: reassignNote.trim() || null,
+    });
+    setReassignLoading(false);
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const res = await fetch("/api/tickets/reassign", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          ticket_id: ticket.id,
-          new_engineer_id: selectedEngineerId,
-        }),
-      });
-
-      if (res.ok) {
-        toast.success("Ticket reassigned");
-        setReassignOpen(false);
-        setSelectedEngineerId("");
-        await loadData();
-      } else {
-        toast.error("Failed to reassign ticket");
-      }
-    } catch {
-      toast.error("Failed to reassign ticket");
-    } finally {
-      setReassignLoading(false);
+    if (ok) {
+      toast.success("Ticket transferred");
+      setReassignOpen(false);
+      setSelectedEngineerId("");
+      setReassignNote("");
+      await loadData();
+    } else {
+      toast.error(error ?? "Failed to transfer ticket");
     }
   };
 
@@ -457,21 +484,55 @@ export default function TicketDetailsPage() {
     );
   }
 
+  const isStaff = isStaffRole(role);
+  const can = ticketPermissions({ id: userId, role }, ticket);
+
+  // In the conversation, the requester is the "user" side (even an admin who
+  // raised a ticket for themselves); everyone else is the support side.
   const currentUserProfile: ChatProfile = {
     id: userId,
-    name: ticket.requester_name,
+    name: myName,
     avatar_url: null,
-    role: role === "engineer" || role === "admin" || role === "superadmin" ? "engineer" : "user",
+    role: can.isRequester ? "user" : "engineer",
   };
 
-  const engineerProfile: ChatProfile = {
-    id: ticket.assignee ?? "engineer",
-    name: engineerName,
-    avatar_url: null,
-    role: "engineer",
-  };
+  // The other side of the conversation: for the requester, the engineer on the
+  // ticket; for the engineer (or a viewer), the requester. Messages and emails
+  // go to this person — never back to the sender.
+  const otherProfile: ChatProfile = can.isRequester
+    ? {
+        id: ticket.assignee ?? "",
+        name: assigneeName ?? "Support Team",
+        avatar_url: null,
+        role: "engineer",
+      }
+    : {
+        id: ticket.requester_id,
+        name: peopleNames[ticket.requester_id] ?? ticket.requester_name ?? "Requester",
+        avatar_url: null,
+        role: "user",
+      };
 
-  const isStaff = role !== "user";
+  // Real names for every message sender
+  const chatParticipants: Record<string, ChatProfile> = Object.fromEntries(
+    messages.map((m) => [
+      m.sender_id,
+      {
+        id: m.sender_id,
+        name:
+          peopleNames[m.sender_id] ??
+          (m.sender_role === "engineer" ? "Support Engineer" : ticket.requester_name ?? "Requester"),
+        avatar_url: null,
+        role: m.sender_role,
+      },
+    ])
+  );
+
+  const chatReadOnlyMessage = can.canChat
+    ? undefined
+    : ticket.assignee
+      ? `View only. This ticket is assigned to ${assigneeName ?? "another engineer"}; only they can reply.`
+      : "Acquire this ticket to reply to the requester.";
 
   /* ── Build activity trail from DB records ── */
   const activityItems: ActivityItem[] = dbActivity.length > 0
@@ -588,11 +649,23 @@ export default function TicketDetailsPage() {
               Back
             </Button>
 
-            {/* Action Buttons */}
+            {/* Action Buttons — only for people allowed to work this ticket */}
             {isStaff && (
               <>
-                {/* Reassign — for admin/superadmin when ticket has an assignee */}
-                {(role === "admin" || role === "superadmin") && ticket.assignee && ticket.status !== "closed" && (
+                {/* Acquire — unassigned ticket; it must be picked up before anyone works on it */}
+                {can.canAcquire && (
+                  <Button size="sm" onClick={handleAcquire} disabled={acquireLoading}>
+                    {acquireLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <UserCheck className="h-4 w-4" />
+                    )}
+                    {acquireLoading ? "Acquiring..." : "Acquire Ticket"}
+                  </Button>
+                )}
+
+                {/* Transfer / escalate — the assigned engineer, or an admin */}
+                {can.canTransfer && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -603,12 +676,12 @@ export default function TicketDetailsPage() {
                     }}
                   >
                     <UserPlus className="h-4 w-4" />
-                    Reassign Ticket
+                    Transfer / Escalate
                   </Button>
                 )}
 
-                {/* Reopen — for closed or on-hold tickets */}
-                {(ticket.status === "closed" || ticket.status === "hold") && (
+                {/* Reopen — closed or on-hold tickets */}
+                {can.canReopen && (
                   <Button
                     size="sm"
                     onClick={handleReopen}
@@ -623,8 +696,8 @@ export default function TicketDetailsPage() {
                   </Button>
                 )}
 
-                {/* Close & Hold — only when ticket is active */}
-                {ticket.status !== "closed" && ticket.status !== "hold" && (
+                {/* Close & Hold — the assigned engineer, while the ticket is active */}
+                {can.canCloseOrHold && (
                   <>
                     <Button
                       variant="outline"
@@ -646,12 +719,22 @@ export default function TicketDetailsPage() {
           </>
         }
       >
-        {hasSlaBreach && (
+        {(hasSlaBreach || can.viewOnly) && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <StatusBadge tone="red">
-              <AlertTriangle className="h-3 w-3" />
-              SLA Breach
-            </StatusBadge>
+            {hasSlaBreach && (
+              <StatusBadge tone="red">
+                <AlertTriangle className="h-3 w-3" />
+                SLA Breach
+              </StatusBadge>
+            )}
+            {can.viewOnly && (
+              <StatusBadge tone="gray">
+                <Eye className="h-3 w-3" />
+                {ticket.assignee
+                  ? `View only · Assigned to ${assigneeName ?? "another engineer"}`
+                  : "Unassigned · Acquire it to start working"}
+              </StatusBadge>
+            )}
           </div>
         )}
       </PageHeader>
@@ -665,13 +748,17 @@ export default function TicketDetailsPage() {
             messages={messages}
             setMessages={setMessages}
             currentUser={currentUserProfile}
-            otherUser={engineerProfile}
+            otherUser={otherProfile}
+            participants={chatParticipants}
             activityItems={activityItems}
+            readOnly={!can.canChat}
+            readOnlyMessage={chatReadOnlyMessage}
             onSend={async (text) => {
+              if (!can.canChat) return;
               await supabase.from("ticket_messages").insert({
                 ticket_id: id,
                 sender_id: userId,
-                sender_role: isStaff ? "engineer" : "user",
+                sender_role: can.isRequester ? "user" : "engineer",
                 message: text,
               });
             }}
@@ -685,7 +772,7 @@ export default function TicketDetailsPage() {
             subject={ticket.subject}
             priority={ticket.priority}
             requesterName={ticket.requester_name}
-            assigneeText={ticket.assignee}
+            assigneeText={ticket.assignee ? assigneeName ?? "Engineer" : null}
             createdAt={ticket.created_at}
             assignedAt={ticket.assigned_at}
             attachments={[]}
@@ -710,6 +797,16 @@ export default function TicketDetailsPage() {
           />
 
           <TicketActivityTrail items={activityItems} />
+
+          {/* The IT team sees the requester's other tickets and their status */}
+          {isStaff && (
+            <RequesterTicketHistory
+              requesterId={ticket.requester_id}
+              requesterName={peopleNames[ticket.requester_id] ?? ticket.requester_name ?? "this user"}
+              currentTicketId={ticket.id}
+              currentUserId={userId}
+            />
+          )}
         </div>
       </div>
 
@@ -719,67 +816,18 @@ export default function TicketDetailsPage() {
         onClose={() => setCloseOpen(false)}
         title="Close Ticket"
         onSubmit={async (comment) => {
-          if (!isStaff) return;
+          if (!can.canCloseOrHold) return;
 
-          await supabase
-            .from("tickets")
-            .update({ status: "closed", closed_comment: comment })
-            .eq("id", ticket.id);
-
-          /* Notify requester */
-          await sendNotification({
-            user_id: ticket.requester_id,
-            actor_id: userId,
+          // The server checks this person is the assigned engineer, updates
+          // the ticket, and notifies the requester (web + email).
+          const { ok, error } = await postJson("/api/tickets/status", {
             ticket_id: ticket.id,
-            type: "closed",
-            message: `closed your ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
+            status: "closed",
+            comment,
           });
 
-          if (requesterEmail) {
-            sendEmailNotification({
-              recipient_email: requesterEmail,
-              recipient_name: ticket.requester_name,
-              actor_name: engineerName,
-              ticket_id: ticket.id,
-              ticket_subject: ticket.subject,
-              action: "closed",
-              comment,
-            });
-          }
-
-          /* Notify the admins responsible for the requester's organization */
-          const admins = await getTicketAdmins(supabase, requesterEmail);
-
-          for (const admin of admins) {
-            if (admin.id === userId) continue;
-
-            sendNotification({
-              user_id: admin.id,
-              actor_id: userId,
-              ticket_id: ticket.id,
-              type: "closed",
-              message: `closed ticket #${ticket.id.slice(0, 8).toUpperCase()}`,
-            });
-
-            if (admin.email) {
-              sendEmailNotification({
-                recipient_email: admin.email,
-                recipient_name: admin.name ?? "Admin",
-                actor_name: engineerName,
-                ticket_id: ticket.id,
-                ticket_subject: ticket.subject,
-                action: "closed",
-                comment,
-              });
-            }
-          }
-
-          logActivity({
-            ticket_id: ticket.id,
-            actor_id: userId,
-            action: "closed",
-            details: { comment, engineer_name: engineerName },
-          });
+          if (ok) toast.success("Ticket closed");
+          else toast.error(error ?? "Failed to close ticket");
 
           setCloseOpen(false);
           await loadData();
@@ -793,88 +841,24 @@ export default function TicketDetailsPage() {
         title="Hold Ticket"
         showHoldDuration
         onSubmit={async (comment, holdDurationHours) => {
-          if (!isStaff) return;
+          if (!can.canCloseOrHold) return;
 
-          const holdStartedAt = new Date().toISOString();
-          const holdUntil = holdDurationHours
-            ? new Date(Date.now() + holdDurationHours * 60 * 60 * 1000).toISOString()
-            : null;
-
-          await supabase
-            .from("tickets")
-            .update({
-              status: "hold",
-              hold_comment: comment,
-              hold_duration_hours: holdDurationHours ?? null,
-              hold_started_at: holdStartedAt,
-              hold_until: holdUntil,
-            })
-            .eq("id", ticket.id);
-
-          await sendNotification({
-            user_id: ticket.requester_id,
-            actor_id: userId,
+          const { ok, error } = await postJson("/api/tickets/status", {
             ticket_id: ticket.id,
-            type: "hold",
-            message: `put your ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
+            status: "hold",
+            comment,
+            hold_duration_hours: holdDurationHours ?? 24,
           });
 
-          if (requesterEmail) {
-            sendEmailNotification({
-              recipient_email: requesterEmail,
-              recipient_name: ticket.requester_name,
-              actor_name: engineerName,
-              ticket_id: ticket.id,
-              ticket_subject: ticket.subject,
-              action: "hold",
-              comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
-            });
-          }
-
-          /* Also notify the requester's organization admins about hold */
-          const admins = await getTicketAdmins(supabase, requesterEmail);
-
-          for (const admin of admins) {
-            if (admin.id !== userId) {
-              sendNotification({
-                user_id: admin.id,
-                actor_id: userId,
-                ticket_id: ticket.id,
-                type: "hold",
-                message: `put ticket #${ticket.id.slice(0, 8).toUpperCase()} on hold for ${holdDurationHours ?? 24} hours`,
-              });
-
-              if (admin.email) {
-                sendEmailNotification({
-                  recipient_email: admin.email,
-                  recipient_name: admin.name ?? "Admin",
-                  actor_name: engineerName,
-                  ticket_id: ticket.id,
-                  ticket_subject: ticket.subject,
-                  action: "hold",
-                  comment: `Hold Duration: ${holdDurationHours ?? 24} hours\nReason: ${comment}`,
-                });
-              }
-            }
-          }
-
-          logActivity({
-            ticket_id: ticket.id,
-            actor_id: userId,
-            action: "hold",
-            details: {
-              hold_duration_hours: holdDurationHours,
-              reason: comment,
-              engineer_name: engineerName,
-            },
-          });
+          if (ok) toast.success("Ticket put on hold");
+          else toast.error(error ?? "Failed to put ticket on hold");
 
           setHoldOpen(false);
           await loadData();
         }}
       />
 
-      {/* Reassign Dialog */}
+      {/* Transfer / Escalate Dialog */}
       <Dialog open={reassignOpen} onOpenChange={setReassignOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -884,10 +868,11 @@ export default function TicketDetailsPage() {
               </span>
               <div className="min-w-0 text-left">
                 <DialogTitle className="text-base font-semibold text-gray-900 dark:text-white">
-                  Reassign Ticket
+                  Transfer / Escalate Ticket
                 </DialogTitle>
                 <DialogDescription className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Select an engineer to reassign this ticket to:
+                  Hand this ticket to another engineer. They, the requester and
+                  your organisation&apos;s admins are notified by email and in the app.
                 </DialogDescription>
               </div>
             </div>
@@ -911,6 +896,18 @@ export default function TicketDetailsPage() {
             </Select>
           </Field>
 
+          <Field>
+            <FieldLabel htmlFor="reassign-note">Note</FieldLabel>
+            <Textarea
+              id="reassign-note"
+              placeholder="Why it is being transferred or escalated (optional)"
+              value={reassignNote}
+              onChange={(e) => setReassignNote(e.target.value)}
+              className="min-h-[90px] resize-none"
+            />
+            <FieldDescription>Included in the emails.</FieldDescription>
+          </Field>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setReassignOpen(false)}>
               Cancel
@@ -920,7 +917,7 @@ export default function TicketDetailsPage() {
               disabled={!selectedEngineerId || reassignLoading}
             >
               {reassignLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-              {reassignLoading ? "Reassigning..." : "Reassign"}
+              {reassignLoading ? "Transferring..." : "Transfer"}
             </Button>
           </DialogFooter>
         </DialogContent>

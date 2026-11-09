@@ -53,6 +53,8 @@ export async function sendEmailNotification(params: {
   ticket_subject: string
   action: string
   comment?: string | null
+  /** "requester" (default): "your ticket" wording; "staff": engineer/admin wording */
+  audience?: "requester" | "staff"
 }): Promise<void> {
   try {
     const {

@@ -8,40 +8,23 @@
 //
 // Each does what the helpdesk's own screens do — the same rows, the same
 // activity entry, the same in-app notifications and emails — so a ticket
-// raised from AskMira is worked here like any other. Admins are notified only
-// if they look after this company (and super admins, as always).
+// raised from AskMira is worked here like any other. Who is notified is
+// decided in lib/ticket-notify.ts, as for the helpdesk.
 
 import { sendTicketEmail } from "@/lib/email"
 import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
+import { notifyTicketEvent } from "@/lib/ticket-notify"
 import {
   BRAND,
   UUID_RE,
   clean,
   db,
   defer,
-  domainOf,
   httpError,
   isStaff,
   shortRef,
-  type Organization,
 } from "./core"
 import { mayWrite, openTicket, type Ctx } from "./queries"
-
-/** Admins who look after this company, and the super admins. */
-async function companyAdmins(org: Organization) {
-  const { data: admins } = await db()
-    .from("users")
-    .select("id, email, full_name, role")
-    .in("role", ["admin", "superadmin"])
-  const { data: access } = await db()
-    .from("user_organization_access")
-    .select("user_id")
-    .eq("organization_id", org.id)
-  const granted = new Set((access ?? []).map((a) => a.user_id))
-  return (admins ?? []).filter(
-    (a) => a.role === "superadmin" || domainOf(String(a.email)) === org.domain || granted.has(a.id)
-  )
-}
 
 function linkOf(value: unknown) {
   const text = clean(value, 500)
@@ -119,37 +102,26 @@ async function createTicket(ctx: Ctx) {
   }
 
   const ref = shortRef(ticket.id)
-  defer(async () => {
-    await sendTicketEmail({
-      to: me.email,
-      recipientName: requesterName,
-      actorName: requesterName,
-      ticketId: ticket.id,
-      ticketSubject: subject,
-      action: "created",
-    }).catch((err) => console.error("Ticket email failed:", err))
-    for (const admin of await companyAdmins(org)) {
-      if (admin.id === me.id) continue
-      await db().from("notifications").insert({
-        user_id: admin.id,
-        actor_id: me.id,
-        ticket_id: ticket.id,
-        type: "status_changed",
-        message: `New ticket #${ref} raised by ${requesterName}`,
-        is_read: false,
-      })
-      if (admin.email) {
-        await sendTicketEmail({
-          to: admin.email,
-          recipientName: admin.full_name || "Admin",
-          actorName: requesterName,
-          ticketId: ticket.id,
-          ticketSubject: subject,
-          action: "created",
-        }).catch((err) => console.error("Ticket email failed:", err))
-      }
-    }
-  })
+  // Same as the helpdesk's New Ticket form: confirmation email (with the
+  // details) to the requester, web notification to the company's IT team.
+  defer(() =>
+    notifyTicketEvent(db(), {
+      event: "created",
+      ticket: {
+        id: ticket.id,
+        subject,
+        requester_id: me.id,
+        requester_name: requesterName,
+        description,
+        category,
+        sub_category: subCategory,
+        priority,
+        location,
+        contact,
+      },
+      actorId: me.id,
+    })
+  )
 
   console.log(`[AskMira] ticket #${ref} raised for ${org.domain} by ${me.email}`)
   return { ticket: { id: ticket.id, ref, subject, status: ticket.status, created_at: ticket.created_at } }
@@ -159,7 +131,12 @@ async function reply(ctx: Ctx) {
   const { me, params } = ctx
   const ticket = await openTicket(ctx, params.ticket_id)
   if (!mayWrite(me, ticket)) {
-    throw httpError(403, "Only the person who raised it and the IT team write on a ticket.")
+    throw httpError(
+      403,
+      ticket.assignee
+        ? "Only the person who raised it and the engineer assigned to it write on a ticket."
+        : `Acquire this ticket in ${BRAND} before writing on it.`
+    )
   }
   const text = clean(params.message, 4000)
   if (!text) throw httpError(422, "Write a message first.")
@@ -205,6 +182,7 @@ async function reply(ctx: Ctx) {
           ticketSubject: ticket.subject,
           action: "message",
           comment: text,
+          audience: support ? "requester" : "staff",
         }).catch((err) => console.error("Ticket email failed:", err))
       }
     })

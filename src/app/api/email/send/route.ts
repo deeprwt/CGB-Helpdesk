@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { sendTicketEmail, type EmailAction } from "@/lib/email"
+import { sendTicketEmail, type EmailAction, type EmailAudience } from "@/lib/email"
 
 export const runtime = "nodejs"
 
@@ -45,6 +45,7 @@ export async function POST(req: Request) {
       ticket_subject,
       action,
       comment,
+      audience,
     } = body as {
       recipient_email: string
       recipient_name: string
@@ -53,6 +54,7 @@ export async function POST(req: Request) {
       ticket_subject: string
       action: EmailAction
       comment?: string | null
+      audience?: EmailAudience
     }
 
     if (!recipient_email || !actor_name || !ticket_id || !ticket_subject || !action) {
@@ -71,6 +73,7 @@ export async function POST(req: Request) {
       ticketSubject: ticket_subject,
       action,
       comment: comment ?? null,
+      audience: audience === "staff" ? "staff" : "requester",
     })
 
     return NextResponse.json({ success: true })

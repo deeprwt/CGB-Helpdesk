@@ -27,6 +27,24 @@ export type EmailAction =
   | "sla_warning"
   | "sla_breach"
   | "status_changed"
+  | "assigned"
+
+/**
+ * Who reads the email. "requester" is the person who raised the ticket
+ * ("your ticket"); "staff" is an engineer or admin ("ticket #ABC").
+ */
+export type EmailAudience = "requester" | "staff"
+
+/** Ticket facts shown in the email body (used for new-ticket emails). */
+export type TicketEmailDetails = {
+  requesterName?: string | null
+  description?: string | null
+  category?: string | null
+  subCategory?: string | null
+  priority?: string | null
+  location?: string | null
+  contact?: string | null
+}
 
 type SendTicketEmailParams = {
   to: string
@@ -37,12 +55,122 @@ type SendTicketEmailParams = {
   action: EmailAction
   comment?: string | null
   ticketUrl?: string
+  audience?: EmailAudience
+  details?: TicketEmailDetails
+}
+
+/** Escape user-typed text before it goes into the HTML email. */
+function esc(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
+/** Escape, then keep line breaks. */
+function escMultiline(value: string | null | undefined): string {
+  return esc(value).replace(/\r?\n/g, "<br />")
 }
 
 /* ──────────────────────────────────────
    Action copy
    ────────────────────────────────────── */
-function getActionDetails(action: EmailAction, actorName: string, ticketShortId: string) {
+
+/** Copy for engineers and admins. Returns null to fall back to the shared copy. */
+function staffActionDetails(action: EmailAction, actorName: string, ticketShortId: string) {
+  switch (action) {
+    case "created":
+      return {
+        subject: `New ticket #${ticketShortId} has been raised`,
+        heading: `New ticket raised by ${actorName}`,
+        description: `A new support ticket <strong>#${ticketShortId}</strong> has been raised and is waiting to be acquired.`,
+        statusLabel: "NEW TICKET",
+        statusColor: "#2563eb",
+        statusBg: "#dbeafe",
+      }
+    case "assigned":
+      return {
+        subject: `Ticket #${ticketShortId} has been assigned to you`,
+        heading: `${actorName} assigned a ticket to you`,
+        description: `Ticket <strong>#${ticketShortId}</strong> is now yours to work on.`,
+        statusLabel: "ASSIGNED TO YOU",
+        statusColor: "#2563eb",
+        statusBg: "#dbeafe",
+      }
+    case "acquired":
+      return {
+        subject: `Ticket #${ticketShortId} has been acquired`,
+        heading: `${actorName} acquired ticket #${ticketShortId}`,
+        description: `Ticket <strong>#${ticketShortId}</strong> has been picked up by ${actorName}.`,
+        statusLabel: "ACQUIRED",
+        statusColor: "#2563eb",
+        statusBg: "#dbeafe",
+      }
+    case "closed":
+      return {
+        subject: `Ticket #${ticketShortId} has been closed`,
+        heading: `${actorName} closed ticket #${ticketShortId}`,
+        description: `Ticket <strong>#${ticketShortId}</strong> has been resolved and closed.`,
+        statusLabel: "CLOSED",
+        statusColor: "#16a34a",
+        statusBg: "#dcfce7",
+      }
+    case "hold":
+      return {
+        subject: `Ticket #${ticketShortId} is on hold`,
+        heading: `${actorName} put ticket #${ticketShortId} on hold`,
+        description: `Ticket <strong>#${ticketShortId}</strong> has been temporarily placed on hold.`,
+        statusLabel: "ON HOLD",
+        statusColor: "#d97706",
+        statusBg: "#fef3c7",
+      }
+    case "reopened":
+      return {
+        subject: `Ticket #${ticketShortId} has been reopened`,
+        heading: `${actorName} reopened ticket #${ticketShortId}`,
+        description: `Ticket <strong>#${ticketShortId}</strong> is active again.`,
+        statusLabel: "REOPENED",
+        statusColor: "#2563eb",
+        statusBg: "#dbeafe",
+      }
+    case "reassigned":
+      return {
+        subject: `Ticket #${ticketShortId} has been transferred`,
+        heading: `${actorName} transferred ticket #${ticketShortId}`,
+        description: `Ticket <strong>#${ticketShortId}</strong> has been transferred to a different engineer.`,
+        statusLabel: "TRANSFERRED",
+        statusColor: "#7c3aed",
+        statusBg: "#ede9fe",
+      }
+    case "message":
+      return {
+        subject: `New message on Ticket #${ticketShortId}`,
+        heading: `${actorName} replied on ticket #${ticketShortId}`,
+        description: `There is a new message on ticket <strong>#${ticketShortId}</strong>.`,
+        statusLabel: "NEW MESSAGE",
+        statusColor: "#7c3aed",
+        statusBg: "#ede9fe",
+      }
+    default:
+      return null
+  }
+}
+
+function getActionDetails(
+  action: EmailAction,
+  rawActorName: string,
+  ticketShortId: string,
+  audience: EmailAudience = "requester"
+) {
+  const actorName = esc(rawActorName)
+
+  if (audience === "staff") {
+    const staffCopy = staffActionDetails(action, actorName, ticketShortId)
+    if (staffCopy) return staffCopy
+  }
+
   switch (action) {
     case "acquired":
       return {
@@ -100,9 +228,9 @@ function getActionDetails(action: EmailAction, actorName: string, ticketShortId:
       }
     case "created":
       return {
-        subject: `Ticket #${ticketShortId} has been created`,
-        heading: `New ticket raised by ${actorName}`,
-        description: `A new support ticket <strong>#${ticketShortId}</strong> has been created and is waiting to be acquired.`,
+        subject: `We've received your ticket #${ticketShortId}`,
+        heading: `Your ticket has been raised`,
+        description: `Your support ticket <strong>#${ticketShortId}</strong> has been logged. An engineer will pick it up shortly, and you will get an email as soon as that happens.`,
         statusLabel: "NEW TICKET",
         statusColor: "#2563eb",
         statusBg: "#dbeafe",
@@ -140,9 +268,45 @@ function getActionDetails(action: EmailAction, actorName: string, ticketShortId:
 /* ──────────────────────────────────────
    HTML Template
    ────────────────────────────────────── */
+/** Label for the "who did it" row in the ticket card. */
+function actorLabel(action: EmailAction, audience: EmailAudience): string {
+  if (action === "created") return "Raised By"
+  if (action === "acquired") return "Assigned Engineer"
+  if (action === "assigned" || action === "reassigned") return "Transferred By"
+  if (action === "message") return audience === "staff" ? "From" : "Engineer"
+  return "Updated By"
+}
+
+/** Extra ticket facts (description, category, …) as rows of the ticket card. */
+function detailRows(details: TicketEmailDetails | undefined): string {
+  if (!details) return ""
+  const category = [details.category, details.subCategory].filter(Boolean).join(" / ")
+  const rows: [string, string | null | undefined][] = [
+    ["Requester", details.requesterName],
+    ["Category", category],
+    ["Priority", details.priority ? details.priority.charAt(0).toUpperCase() + details.priority.slice(1) : null],
+    ["Location", details.location],
+    ["Contact", details.contact],
+    ["Description", details.description],
+  ]
+  return rows
+    .filter(([, value]) => value && String(value).trim())
+    .map(
+      ([label, value]) => `
+                      <tr>
+                        <td style="padding:14px 0;border-top:1px solid #e5e7eb;">
+                          <p style="margin:0;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;">${label}</p>
+                          <p style="margin:4px 0 0;font-size:14px;color:#111827;line-height:1.5;">${escMultiline(value)}</p>
+                        </td>
+                      </tr>`
+    )
+    .join("")
+}
+
 function buildEmailHtml(params: SendTicketEmailParams): string {
   const ticketShortId = params.ticketId.slice(0, 8).toUpperCase()
-  const details = getActionDetails(params.action, params.actorName, ticketShortId)
+  const audience = params.audience ?? "requester"
+  const details = getActionDetails(params.action, params.actorName, ticketShortId, audience)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
   const ticketUrl = params.ticketUrl ?? `${appUrl}/ticket/${params.ticketId}`
   const logoUrl = `${appUrl}/images/logo/logo-icon.svg`
@@ -186,7 +350,7 @@ function buildEmailHtml(params: SendTicketEmailParams): string {
               </table>
 
               <!-- Greeting -->
-              <p style="margin:0 0 6px;font-size:14px;color:#6b7280;">Hello,</p>
+              <p style="margin:0 0 6px;font-size:14px;color:#6b7280;">Hello${params.recipientName ? ` ${esc(params.recipientName)}` : ""},</p>
               <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#111827;line-height:1.3;">
                 ${details.heading}
               </h1>
@@ -208,15 +372,15 @@ function buildEmailHtml(params: SendTicketEmailParams): string {
                       <tr>
                         <td style="padding:14px 0;border-bottom:1px solid #e5e7eb;">
                           <p style="margin:0;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;">Subject</p>
-                          <p style="margin:4px 0 0;font-size:15px;font-weight:600;color:#111827;">${params.ticketSubject}</p>
+                          <p style="margin:4px 0 0;font-size:15px;font-weight:600;color:#111827;">${esc(params.ticketSubject)}</p>
                         </td>
                       </tr>
                       <tr>
-                        <td style="padding-top:14px;">
-                          <p style="margin:0;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;">${params.action === "acquired" ? "Assigned Engineer" : "Updated By"}</p>
-                          <p style="margin:4px 0 0;font-size:15px;font-weight:600;color:#111827;">${params.actorName}</p>
+                        <td style="padding:14px 0 ${params.details ? "14px" : "0"};">
+                          <p style="margin:0;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;">${actorLabel(params.action, audience)}</p>
+                          <p style="margin:4px 0 0;font-size:15px;font-weight:600;color:#111827;">${esc(params.actorName)}</p>
                         </td>
-                      </tr>
+                      </tr>${detailRows(params.details)}
                     </table>
                   </td>
                 </tr>
@@ -228,7 +392,7 @@ function buildEmailHtml(params: SendTicketEmailParams): string {
                 <tr>
                   <td style="padding:16px 20px;">
                     <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#92400e;text-transform:uppercase;letter-spacing:0.5px;">Comment</p>
-                    <p style="margin:0;font-size:14px;color:#78350f;line-height:1.5;">${params.comment}</p>
+                    <p style="margin:0;font-size:14px;color:#78350f;line-height:1.5;">${escMultiline(params.comment)}</p>
                   </td>
                 </tr>
               </table>
@@ -287,7 +451,7 @@ export async function sendTicketEmail(params: SendTicketEmailParams): Promise<vo
   }
 
   const ticketShortId = params.ticketId.slice(0, 8).toUpperCase()
-  const details = getActionDetails(params.action, params.actorName, ticketShortId)
+  const details = getActionDetails(params.action, params.actorName, ticketShortId, params.audience)
 
   await transporter.sendMail({
     from: `"CGB Solutions Helpdesk" <${process.env.SMTP_FROM ?? process.env.SMTP_USER}>`,

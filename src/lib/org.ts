@@ -166,6 +166,25 @@ export type TicketAdmin = {
   role: string
 }
 
+/** Same shape as TicketAdmin, for any IT role (engineer, admin, superadmin). */
+export type TicketStaff = TicketAdmin
+
+/**
+ * Domains an IT team member works on: the ones from getUserAccessibleDomains
+ * plus their own email domain, so tickets raised inside their own company
+ * (including their own tickets) are never hidden from them.
+ */
+export async function getStaffWorkDomains(
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  userRole: string
+): Promise<string[]> {
+  const domains = await getUserAccessibleDomains(supabase, userId, userEmail, userRole)
+  const own = extractOrgDomain(userEmail)
+  return [...new Set([...domains, own].map((d) => d.toLowerCase()).filter(Boolean))]
+}
+
 /**
  * Admins who should hear about a ticket: every superadmin, plus admins whose
  * email domain is the requester's organization or who were granted access to
@@ -177,11 +196,24 @@ export type TicketAdmin = {
 export async function loadTicketAdminPicker(
   supabase: SupabaseClient
 ): Promise<(requesterEmail: string | null | undefined) => TicketAdmin[]> {
+  return loadTicketStaffPicker(supabase, ["admin", "superadmin"])
+}
+
+/**
+ * Like loadTicketAdminPicker, for any set of IT roles. With the default roles
+ * it returns the whole IT team looking after the requester's organization:
+ * engineers and admins of that domain or granted access to it, and every
+ * superadmin.
+ */
+export async function loadTicketStaffPicker(
+  supabase: SupabaseClient,
+  roles: string[] = ["engineer", "admin", "superadmin"]
+): Promise<(requesterEmail: string | null | undefined) => TicketStaff[]> {
   const [{ data: admins }, { data: orgs }, { data: access }] = await Promise.all([
     supabase
       .from("users")
       .select("id, email, name:full_name, role")
-      .in("role", ["admin", "superadmin"]),
+      .in("role", roles),
     supabase.from("organizations").select("id, domain"),
     fetchAllRows<{ user_id: string; organization_id: string }>((from, to) =>
       supabase
@@ -200,7 +232,7 @@ export async function loadTicketAdminPicker(
   return (requesterEmail) => {
     const domain = extractOrgDomain(requesterEmail ?? "")
     const orgId = orgIdByDomain.get(domain)
-    return ((admins ?? []) as TicketAdmin[]).filter(
+    return ((admins ?? []) as TicketStaff[]).filter(
       (a) =>
         a.role === "superadmin" ||
         (!!domain && extractOrgDomain(a.email ?? "") === domain) ||

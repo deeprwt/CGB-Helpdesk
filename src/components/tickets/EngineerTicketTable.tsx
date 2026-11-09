@@ -3,7 +3,7 @@
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
-import { getUserAccessibleDomains, getOrgUserIdsByDomains } from "@/lib/org"
+import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 import { DataTable, DATA_TABLE_ALL_ROWS } from "@/components/ui/data-table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -11,15 +11,15 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { StatusBadge } from "@/components/common/status-badge"
 import TicketFilters from "@/components/tickets/TicketFilters"
-import { Eye, Inbox, ListTodo, UserCheck } from "lucide-react"
+import { Eye, Inbox, Layers, ListTodo, Loader2, Send, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { timeAgo, STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import { getInitials } from "@/hooks/useCurrentUser"
-import { sendNotification, sendEmailNotification } from "@/lib/notify"
-import { logActivity } from "@/lib/activity"
 
 const DEFAULT_PAGE_SIZE = 50
+
+type Tab = "queue" | "mytask" | "raised" | "all"
 
 type Ticket = {
   id: string
@@ -34,11 +34,38 @@ type Ticket = {
   assignee: string | null
 }
 
+const TAB_COPY: Record<Tab, { description: string; emptyTitle: string; emptyDescription: string }> = {
+  queue: {
+    description: "Unassigned tickets from your organisation, newest first.",
+    emptyTitle: "Queue is clear",
+    emptyDescription: "There are no unassigned tickets matching your filters.",
+  },
+  mytask: {
+    description: "Tickets currently assigned to you.",
+    emptyTitle: "No tasks assigned",
+    emptyDescription: "Tickets you acquire, or that are transferred to you, will show up here.",
+  },
+  raised: {
+    description: "Tickets you raised for yourself, and who is working on them.",
+    emptyTitle: "You haven't raised any tickets",
+    emptyDescription: "Tickets you raise for yourself will show up here.",
+  },
+  all: {
+    description:
+      "Every ticket in your organisation. Tickets assigned to someone else are view only until they are transferred to you.",
+    emptyTitle: "No tickets found",
+    emptyDescription: "There are no tickets matching your filters.",
+  },
+}
+
 export default function EngineerTicketTable() {
   const router = useRouter()
 
   const [tickets, setTickets] = React.useState<Ticket[]>([])
-  const [tab, setTab] = React.useState<"queue" | "mytask">("queue")
+  const [tab, setTab] = React.useState<Tab>("queue")
+  const [me, setMe] = React.useState<string | null>(null)
+  const [assigneeNames, setAssigneeNames] = React.useState<Record<string, string>>({})
+  const [acquiring, setAcquiring] = React.useState<string | null>(null)
 
   const [search, setSearch] = React.useState("")
   const [status, setStatus] = React.useState("all")
@@ -56,6 +83,7 @@ export default function EngineerTicketTable() {
     } = await supabase.auth.getUser()
 
     if (!user) return
+    setMe(user.id)
 
     const from = (page - 1) * pageSize
     const to = from + pageSize - 1
@@ -68,15 +96,15 @@ export default function EngineerTicketTable() {
     // "All" skips the range; Supabase's own max-rows setting still caps the response
     if (pageSize !== DATA_TABLE_ALL_ROWS) query = query.range(from, to)
 
-    if (tab === "queue") {
-      // Queue: unassigned tickets scoped to this engineer's org(s)
+    if (tab === "queue" || tab === "all") {
+      // Queue / All: tickets raised by anyone in the organisation(s) this person looks after
       const { data: roleData } = await supabase
         .from("users")
         .select("role")
         .eq("id", user.id)
         .single()
       const userRole = roleData?.role ?? "engineer"
-      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", userRole)
+      const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", userRole)
       const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
 
       if (orgUserIds.length === 0) {
@@ -86,10 +114,14 @@ export default function EngineerTicketTable() {
         return
       }
 
-      query = query.is("assignee", null).in("requester_id", orgUserIds)
-    } else {
+      query = query.in("requester_id", orgUserIds)
+      if (tab === "queue") query = query.is("assignee", null)
+    } else if (tab === "mytask") {
       // My tasks: tickets assigned to this specific engineer
       query = query.eq("assignee", user.id)
+    } else {
+      // Raised by me: tickets this person raised for themselves
+      query = query.eq("requester_id", user.id)
     }
 
     if (status !== "all") query = query.eq("status", status)
@@ -103,9 +135,26 @@ export default function EngineerTicketTable() {
       return
     }
 
-    setTickets(data ?? [])
+    const rows = (data ?? []) as Ticket[]
+    setTickets(rows)
     setHasNext((count ?? 0) > page * pageSize)
     setTotal(count ?? undefined)
+
+    /* Names of the engineers working on these tickets */
+    const assigneeIds = [...new Set(rows.map((t) => t.assignee).filter((a): a is string => !!a))]
+    if (assigneeIds.length > 0) {
+      const { data: people } = await supabase
+        .from("users")
+        .select("id, full_name")
+        .in("id", assigneeIds)
+      setAssigneeNames(
+        Object.fromEntries(
+          (people ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name ?? "Engineer"])
+        )
+      )
+    } else {
+      setAssigneeNames({})
+    }
   }
 
   React.useEffect(() => {
@@ -130,77 +179,40 @@ export default function EngineerTicketTable() {
     }
   }, [tab, search, status, category, page, pageSize])
 
-  const acquireTicket = async (ticketId: string, requesterId: string) => {
+  /* Acquire runs on the server: it only succeeds while the ticket is still
+     unassigned, and the requester is notified there (web + email). */
+  const acquireTicket = async (ticketId: string) => {
     const {
-      data: { user },
-    } = await supabase.auth.getUser()
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (!session) return
 
-    if (!user) return
-
-    const now = new Date()
-    const slaResolutionAt = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString()
-
-    const { error } = await supabase
-      .from("tickets")
-      .update({
-        assignee: user.id,
-        status: "open",
-        assigned_at: now.toISOString(),
-        sla_resolution_at: slaResolutionAt,
-      })
-      .eq("id", ticketId)
-      .is("assignee", null)
-
-    if (error) {
-      toast.error("Ticket already acquired")
-    } else {
-      toast.success("Ticket acquired")
-
-      /* Notify the user who raised the ticket */
-      await sendNotification({
-        user_id: requesterId,
-        actor_id: user.id,
-        ticket_id: ticketId,
-        type: "acquired",
-        message: `acquired your ticket #${ticketId.slice(0, 8).toUpperCase()}`,
+    setAcquiring(ticketId)
+    try {
+      const res = await fetch("/api/tickets/acquire", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ ticket_id: ticketId }),
       })
 
-      /* Send email notification */
-      const [requesterRes, engineerRes, ticketRes] = await Promise.all([
-        supabase.from("users").select("email, name:full_name").eq("id", requesterId).single(),
-        supabase.from("users").select("name:full_name").eq("id", user.id).single(),
-        supabase.from("tickets").select("subject").eq("id", ticketId).single(),
-      ])
-
-      if (requesterRes.data?.email) {
-        sendEmailNotification({
-          recipient_email: requesterRes.data.email,
-          recipient_name: requesterRes.data.name ?? "User",
-          actor_name: engineerRes.data?.name ?? "Support Engineer",
-          ticket_id: ticketId,
-          ticket_subject: ticketRes.data?.subject ?? "Support Ticket",
-          action: "acquired",
-        })
+      if (res.ok) {
+        toast.success("Ticket acquired")
+      } else {
+        const result = await res.json().catch(() => null)
+        toast.error(result?.error ?? "Failed to acquire ticket")
       }
-
-      /* Log activity + assignment record */
-      logActivity({
-        ticket_id: ticketId,
-        actor_id: user.id,
-        action: "acquired",
-        details: { engineer_name: engineerRes.data?.name ?? "Engineer" },
-      })
-
-      // Insert assignment record (non-blocking)
-      supabase.from("ticket_assignments").insert({
-        ticket_id: ticketId,
-        engineer_id: user.id,
-        action: "acquired",
-      }).then(() => {})
-
+    } catch {
+      toast.error("Failed to acquire ticket")
+    } finally {
+      setAcquiring(null)
       loadTickets()
     }
   }
+
+  const showAssignee = tab === "all" || tab === "raised"
 
   const columns: ColumnDef<Ticket>[] = [
     {
@@ -248,6 +260,23 @@ export default function EngineerTicketTable() {
         </div>
       ),
     },
+    ...(showAssignee
+      ? ([
+          {
+            accessorKey: "assignee",
+            header: "Assignee",
+            cell: ({ row }) => {
+              const a = row.original.assignee
+              if (!a) return <span className="text-gray-400 dark:text-gray-500">Unassigned</span>
+              return (
+                <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
+                  {a === me ? "You" : assigneeNames[a] ?? "Engineer"}
+                </span>
+              )
+            },
+          },
+        ] as ColumnDef<Ticket>[])
+      : []),
     {
       accessorKey: "created_at",
       header: "Created",
@@ -285,31 +314,46 @@ export default function EngineerTicketTable() {
       enableSorting: false,
       cell: ({ row }) => {
         const t = row.original
-        return tab === "queue" ? (
-          <Button size="sm" onClick={() => acquireTicket(t.id, t.requester_id)}>
-            <UserCheck />
-            Acquire
-          </Button>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
+        const viewOnly = !!t.assignee && t.assignee !== me && t.requester_id !== me
+        const viewLabel = viewOnly
+          ? `View only: assigned to ${assigneeNames[t.assignee!] ?? "another engineer"}`
+          : "View ticket"
+
+        return (
+          <div className="flex items-center justify-end gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={viewLabel}
+                  className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
+                  onClick={() => router.push(`/ticket/${t.id}`)}
+                >
+                  <Eye />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{viewLabel}</TooltipContent>
+            </Tooltip>
+
+            {!t.assignee && t.status !== "closed" && (tab === "queue" || tab === "all") && (
               <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="View ticket"
-                className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-                onClick={() => router.push(`/ticket/${t.id}`)}
+                size="sm"
+                disabled={acquiring === t.id}
+                onClick={() => acquireTicket(t.id)}
               >
-                <Eye />
+                {acquiring === t.id ? <Loader2 className="animate-spin" /> : <UserCheck />}
+                Acquire
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>View ticket</TooltipContent>
-          </Tooltip>
+            )}
+          </div>
         )
       },
       meta: { className: "text-right", headerClassName: "text-right" },
     },
   ]
+
+  const copy = TAB_COPY[tab]
 
   return (
     <DataTable
@@ -318,11 +362,7 @@ export default function EngineerTicketTable() {
       loading={loading}
       getRowId={(t) => t.id}
       title="Engineer Tickets"
-      description={
-        tab === "queue"
-          ? "Unassigned tickets from your organisation, newest first."
-          : "Tickets currently assigned to you."
-      }
+      description={copy.description}
       searchable
       searchPlaceholder="Search by subject…"
       search={search}
@@ -339,11 +379,11 @@ export default function EngineerTicketTable() {
         <Tabs
           value={tab}
           onValueChange={(v) => {
-            setTab(v as "queue" | "mytask")
+            setTab(v as Tab)
             setPage(1)
           }}
         >
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="queue">
               <Inbox />
               Queue
@@ -351,6 +391,14 @@ export default function EngineerTicketTable() {
             <TabsTrigger value="mytask">
               <ListTodo />
               My Tasks
+            </TabsTrigger>
+            <TabsTrigger value="raised">
+              <Send />
+              Raised by Me
+            </TabsTrigger>
+            <TabsTrigger value="all">
+              <Layers />
+              All Tickets
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -367,14 +415,10 @@ export default function EngineerTicketTable() {
         },
       }}
       entityName="tickets"
-      emptyIcon={tab === "queue" ? Inbox : ListTodo}
-      emptyTitle={tab === "queue" ? "Queue is clear" : "No tasks assigned"}
-      emptyDescription={
-        tab === "queue"
-          ? "There are no unassigned tickets matching your filters."
-          : "Tickets you acquire will show up here."
-      }
-      onRowClick={tab === "mytask" ? (t) => router.push(`/ticket/${t.id}`) : undefined}
+      emptyIcon={tab === "queue" ? Inbox : tab === "mytask" ? ListTodo : tab === "raised" ? Send : Layers}
+      emptyTitle={copy.emptyTitle}
+      emptyDescription={copy.emptyDescription}
+      onRowClick={(t) => router.push(`/ticket/${t.id}`)}
     />
   )
 }

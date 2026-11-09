@@ -1,59 +1,56 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-import { sendTicketEmail } from "@/lib/email"
-import { getTicketAdmins } from "@/lib/org"
+import { NextResponse, after } from "next/server"
+import {
+  getRequestUser,
+  jsonError,
+  loadPerson,
+  serviceClient,
+  staffCoversRequester,
+} from "@/lib/ticket-server"
+import { isAdminRole, ticketPermissions } from "@/lib/ticket-access"
+import { notifyTicketEvent } from "@/lib/ticket-notify"
 
 export const runtime = "nodejs"
 
+/**
+ * POST /api/tickets/reopen  { ticket_id }
+ * Reopens a closed ticket, or resumes one on hold.
+ * Allowed for the assigned engineer, or an admin of the ticket's organisation.
+ */
 export async function POST(req: Request) {
   try {
-    const authHeader =
-      req.headers.get("authorization") ?? req.headers.get("Authorization")
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const authUser = await getRequestUser(req)
+    if (!authUser) return jsonError("Unauthorized", 401)
+
+    const { ticket_id } = await req.json().catch(() => ({}))
+    if (!ticket_id) return jsonError("Missing ticket_id", 400)
+
+    const db = serviceClient()
+    const me = await loadPerson(db, authUser.id)
+    if (!me) return jsonError("Unauthorized", 401)
+
+    /* 1. Get ticket and check who may reopen it */
+    const { data: ticket } = await db.from("tickets").select("*").eq("id", ticket_id).maybeSingle()
+    if (!ticket) return jsonError("Ticket not found", 404)
+
+    const can = ticketPermissions(me, ticket)
+    if (!can.canReopen) {
+      return jsonError(
+        ticket.status === "closed" || ticket.status === "hold"
+          ? "Only the assigned engineer or an admin can reopen this ticket"
+          : "This ticket is not closed or on hold",
+        403
+      )
     }
 
-    const accessToken = authHeader.replace("Bearer ", "")
-    const supabaseAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        global: { headers: { Authorization: `Bearer ${accessToken}` } },
-        auth: { persistSession: false },
+    if (isAdminRole(me.role) && ticket.assignee !== me.id) {
+      const { data: requester } = await db
+        .from("users")
+        .select("email")
+        .eq("id", ticket.requester_id)
+        .maybeSingle()
+      if (!(await staffCoversRequester(db, me, requester?.email))) {
+        return jsonError("This ticket belongs to an organisation you don't look after", 403)
       }
-    )
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseAuth.auth.getUser()
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const body = await req.json()
-    const { ticket_id } = body
-
-    if (!ticket_id) {
-      return NextResponse.json({ error: "Missing ticket_id" }, { status: 400 })
-    }
-
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { persistSession: false } }
-    )
-
-    /* 1. Get ticket */
-    const { data: ticket, error: ticketError } = await supabaseAdmin
-      .from("tickets")
-      .select("*")
-      .eq("id", ticket_id)
-      .single()
-
-    if (ticketError || !ticket) {
-      return NextResponse.json({ error: "Ticket not found" }, { status: 404 })
     }
 
     /* 2. Calculate new SLA resolution deadline */
@@ -69,7 +66,7 @@ export async function POST(req: Request) {
         slaResolutionAt = new Date(originalDeadline + pausedMs).toISOString()
       }
 
-      await supabaseAdmin
+      const { error } = await db
         .from("tickets")
         .update({
           status: "open",
@@ -82,11 +79,12 @@ export async function POST(req: Request) {
           sla_resolution_breached: false,
         })
         .eq("id", ticket_id)
+      if (error) throw error
     } else {
       // Reopening from closed — reset resolution SLA (6 hours from now)
       slaResolutionAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
 
-      await supabaseAdmin
+      const { error } = await db
         .from("tickets")
         .update({
           status: "open",
@@ -99,85 +97,28 @@ export async function POST(req: Request) {
           sla_resolution_breached: false,
         })
         .eq("id", ticket_id)
+      if (error) throw error
     }
 
     /* 3. Log activity */
-    const { data: engineerData } = await supabaseAdmin
-      .from("users")
-      .select("name:full_name")
-      .eq("id", user.id)
-      .single()
-
-    await supabaseAdmin.from("ticket_activity").insert({
+    await db.from("ticket_activity").insert({
       ticket_id,
-      actor_id: user.id,
+      actor_id: me.id,
       action: "reopened",
       details: {
         previous_status: ticket.status,
-        engineer_name: engineerData?.name ?? "Engineer",
+        engineer_name: me.full_name?.trim() || "Engineer",
       },
     })
 
-    /* 4. Notify requester */
-    const ticketShortId = ticket_id.slice(0, 8).toUpperCase()
-    const actorName = engineerData?.name ?? "Support Engineer"
-
-    const { data: requester } = await supabaseAdmin
-      .from("users")
-      .select("name:full_name, email")
-      .eq("id", ticket.requester_id)
-      .single()
-
-    // In-app notification to requester
-    if (ticket.requester_id !== user.id) {
-      await supabaseAdmin.from("notifications").insert({
-        user_id: ticket.requester_id,
-        actor_id: user.id,
-        ticket_id,
-        type: "status_changed",
-        message: `reopened your ticket #${ticketShortId}`,
-        is_read: false,
-      })
-    }
-
-    // Email to requester
-    if (requester?.email) {
-      await sendTicketEmail({
-        to: requester.email,
-        recipientName: requester.name ?? "User",
-        actorName,
-        ticketId: ticket_id,
-        ticketSubject: ticket.subject,
-        action: "reopened",
-      }).catch((err) => console.error("Ticket email failed:", err))
-    }
-
-    /* 5. Notify the admins responsible for the requester's organization */
-    const admins = await getTicketAdmins(supabaseAdmin, requester?.email)
-
-    for (const admin of admins) {
-      if (admin.id === user.id) continue
-
-      await supabaseAdmin.from("notifications").insert({
-        user_id: admin.id,
-        actor_id: user.id,
-        ticket_id,
-        type: "status_changed",
-        message: `reopened ticket #${ticketShortId}`,
-        is_read: false,
-      })
-
-      if (admin.email) {
-        await sendTicketEmail({
-          to: admin.email,
-          recipientName: admin.name ?? "Admin",
-          actorName,
-          ticketId: ticket_id,
-          ticketSubject: ticket.subject,
-          action: "reopened",
-        }).catch((err) => console.error("Ticket email failed:", err))
-      }
-    }
+    /* 4. Requester and assigned engineer hear about it */
+    after(() =>
+      notifyTicketEvent(db, {
+        event: "reopened",
+        ticket,
+        actorId: me.id,
+      }).catch((err) => console.error("Reopen notifications failed:", err))
+    )
 
     return NextResponse.json({ success: true })
   } catch (err) {

@@ -1,74 +1,75 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-import { sendTicketEmail } from "@/lib/email"
+import { NextResponse, after } from "next/server"
+import {
+  getRequestUser,
+  jsonError,
+  loadPerson,
+  serviceClient,
+  staffCoversRequester,
+} from "@/lib/ticket-server"
+import { isAdminRole, isStaffRole, ticketPermissions } from "@/lib/ticket-access"
+import { notifyTicketEvent } from "@/lib/ticket-notify"
 
 export const runtime = "nodejs"
 
+/**
+ * POST /api/tickets/reassign  { ticket_id, new_engineer_id, comment? }
+ * Transfers (escalates) a ticket to another engineer.
+ * Allowed for the engineer it is assigned to, or an admin of its organisation.
+ */
 export async function POST(req: Request) {
   try {
-    const authHeader =
-      req.headers.get("authorization") ?? req.headers.get("Authorization")
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authUser = await getRequestUser(req)
+    if (!authUser) return jsonError("Unauthorized", 401)
 
-    const accessToken = authHeader.replace("Bearer ", "")
-    const supabaseAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        global: { headers: { Authorization: `Bearer ${accessToken}` } },
-        auth: { persistSession: false },
-      }
-    )
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseAuth.auth.getUser()
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
     const { ticket_id, new_engineer_id } = body
+    const comment: string | null =
+      typeof body.comment === "string" && body.comment.trim() ? body.comment.trim() : null
 
-    if (!ticket_id || !new_engineer_id) {
-      return NextResponse.json({ error: "Missing fields" }, { status: 400 })
+    if (!ticket_id || !new_engineer_id) return jsonError("Missing fields", 400)
+
+    const db = serviceClient()
+    const me = await loadPerson(db, authUser.id)
+    if (!me) return jsonError("Unauthorized", 401)
+
+    /* 1. Get current ticket and check who may transfer it */
+    const { data: ticket } = await db.from("tickets").select("*").eq("id", ticket_id).maybeSingle()
+    if (!ticket) return jsonError("Ticket not found", 404)
+
+    const can = ticketPermissions(me, ticket)
+    if (!can.canTransfer) {
+      return jsonError(
+        ticket.status === "closed"
+          ? "Reopen the ticket before transferring it"
+          : "Only the assigned engineer or an admin can transfer this ticket",
+        403
+      )
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { persistSession: false } }
-    )
-
-    /* 1. Get current ticket */
-    const { data: ticket, error: ticketError } = await supabaseAdmin
-      .from("tickets")
-      .select("*")
-      .eq("id", ticket_id)
-      .single()
-
-    if (ticketError || !ticket) {
-      return NextResponse.json({ error: "Ticket not found" }, { status: 404 })
+    if (isAdminRole(me.role) && ticket.assignee !== me.id) {
+      const { data: requester } = await db
+        .from("users")
+        .select("email")
+        .eq("id", ticket.requester_id)
+        .maybeSingle()
+      if (!(await staffCoversRequester(db, me, requester?.email))) {
+        return jsonError("This ticket belongs to an organisation you don't look after", 403)
+      }
     }
 
-    const previousAssignee = ticket.assignee
-
-    /* 2. Close previous assignment */
-    if (previousAssignee) {
-      await supabaseAdmin
-        .from("ticket_assignments")
-        .update({ unassigned_at: new Date().toISOString() })
-        .eq("ticket_id", ticket_id)
-        .eq("engineer_id", previousAssignee)
-        .is("unassigned_at", null)
+    if (new_engineer_id === ticket.assignee) {
+      return jsonError("The ticket is already assigned to this engineer", 400)
     }
 
-    /* 3. Update ticket assignee */
-    const { error: updateError } = await supabaseAdmin
+    const newEngineer = await loadPerson(db, new_engineer_id)
+    if (!newEngineer || !isStaffRole(newEngineer.role)) {
+      return jsonError("Tickets can only be transferred to an engineer or admin", 400)
+    }
+
+    const previousAssignee: string | null = ticket.assignee
+
+    /* 2. Update ticket assignee (only if nobody changed it meanwhile) */
+    let update = db
       .from("tickets")
       .update({
         assignee: new_engineer_id,
@@ -76,136 +77,57 @@ export async function POST(req: Request) {
         status: "open",
       })
       .eq("id", ticket_id)
+    update = previousAssignee ? update.eq("assignee", previousAssignee) : update.is("assignee", null)
 
+    const { data: updated, error: updateError } = await update.select("id")
     if (updateError) throw updateError
+    if (!updated || updated.length === 0) {
+      return jsonError("The ticket was changed by someone else. Refresh and try again.", 409)
+    }
+
+    /* 3. Close previous assignment */
+    if (previousAssignee) {
+      await db
+        .from("ticket_assignments")
+        .update({ unassigned_at: new Date().toISOString() })
+        .eq("ticket_id", ticket_id)
+        .eq("engineer_id", previousAssignee)
+        .is("unassigned_at", null)
+    }
 
     /* 4. Insert new assignment record */
-    await supabaseAdmin.from("ticket_assignments").insert({
+    await db.from("ticket_assignments").insert({
       ticket_id,
       engineer_id: new_engineer_id,
       action: "reassigned",
     })
 
     /* 5. Log activity */
-    const [prevEngineerRes, newEngineerRes] = await Promise.all([
-      previousAssignee
-        ? supabaseAdmin.from("users").select("name:full_name").eq("id", previousAssignee).single()
-        : Promise.resolve({ data: null }),
-      supabaseAdmin.from("users").select("name:full_name, email").eq("id", new_engineer_id).single(),
-    ])
-
-    await supabaseAdmin.from("ticket_activity").insert({
+    const prevEngineer = previousAssignee ? await loadPerson(db, previousAssignee) : null
+    await db.from("ticket_activity").insert({
       ticket_id,
-      actor_id: user.id,
+      actor_id: me.id,
       action: "reassigned",
       details: {
         previous_assignee: previousAssignee,
-        previous_engineer_name: prevEngineerRes.data?.name ?? null,
+        previous_engineer_name: prevEngineer?.full_name ?? null,
         new_assignee: new_engineer_id,
-        new_engineer_name: newEngineerRes.data?.name ?? "Engineer",
+        new_engineer_name: newEngineer.full_name ?? "Engineer",
+        ...(comment ? { comment } : {}),
       },
     })
 
-    /* 6. Get requester info */
-    const ticketShortId = ticket_id.slice(0, 8).toUpperCase()
-    const newEngineerName = newEngineerRes.data?.name ?? "Support Engineer"
-    const prevEngineerName = prevEngineerRes.data?.name ?? "Previous Engineer"
-
-    const { data: requester } = await supabaseAdmin
-      .from("users")
-      .select("name:full_name, email")
-      .eq("id", ticket.requester_id)
-      .single()
-
-    /* 7. Email requester about reassignment */
-    if (requester?.email) {
-      await sendTicketEmail({
-        to: requester.email,
-        recipientName: requester.name ?? "User",
-        actorName: newEngineerName,
-        ticketId: ticket_id,
-        ticketSubject: ticket.subject,
-        action: "reassigned",
-        comment: `Your ticket has been reassigned from ${prevEngineerName} to ${newEngineerName}.`,
-      }).catch((err) => console.error("Ticket email failed:", err))
-    }
-
-    /* 8. Email new engineer */
-    if (newEngineerRes.data?.email) {
-      await sendTicketEmail({
-        to: newEngineerRes.data.email,
-        recipientName: newEngineerName,
-        actorName: "Admin",
-        ticketId: ticket_id,
-        ticketSubject: ticket.subject,
-        action: "acquired",
-        comment: `Ticket #${ticketShortId} has been assigned to you.`,
-      }).catch((err) => console.error("Ticket email failed:", err))
-    }
-
-    /* 9. Email previous engineer about unassignment */
-    if (previousAssignee) {
-      const { data: prevEngineerEmail } = await supabaseAdmin
-        .from("users")
-        .select("email")
-        .eq("id", previousAssignee)
-        .single()
-
-      if (prevEngineerEmail?.email) {
-        await sendTicketEmail({
-          to: prevEngineerEmail.email,
-          recipientName: prevEngineerName,
-          actorName: "Admin",
-          ticketId: ticket_id,
-          ticketSubject: ticket.subject,
-          action: "reassigned",
-          comment: `Ticket #${ticketShortId} has been reassigned from you to ${newEngineerName}.`,
-        }).catch((err) => console.error("Ticket email failed:", err))
-      }
-    }
-
-    /* 10. Insert in-app notifications */
-    const notifBase = {
-      ticket_id,
-      actor_id: user.id,
-      is_read: false,
-    }
-
-    const notifications = []
-
-    // Notify requester
-    if (ticket.requester_id !== user.id) {
-      notifications.push({
-        ...notifBase,
-        user_id: ticket.requester_id,
-        type: "status_changed",
-        message: `reassigned your ticket #${ticketShortId} to ${newEngineerName}`,
-      })
-    }
-
-    // Notify new engineer
-    if (new_engineer_id !== user.id) {
-      notifications.push({
-        ...notifBase,
-        user_id: new_engineer_id,
-        type: "acquired",
-        message: `assigned ticket #${ticketShortId} to you`,
-      })
-    }
-
-    // Notify previous engineer
-    if (previousAssignee && previousAssignee !== user.id) {
-      notifications.push({
-        ...notifBase,
-        user_id: previousAssignee,
-        type: "status_changed",
-        message: `unassigned you from ticket #${ticketShortId} and reassigned to ${newEngineerName}`,
-      })
-    }
-
-    if (notifications.length > 0) {
-      await supabaseAdmin.from("notifications").insert(notifications)
-    }
+    /* 6. Requester, both engineers and the organisation's admins hear about it */
+    after(() =>
+      notifyTicketEvent(db, {
+        event: "transferred",
+        ticket: { ...ticket, assignee: new_engineer_id },
+        actorId: me.id,
+        previousAssignee,
+        newAssignee: new_engineer_id,
+        comment,
+      }).catch((err) => console.error("Transfer notifications failed:", err))
+    )
 
     return NextResponse.json({ success: true })
   } catch (err) {

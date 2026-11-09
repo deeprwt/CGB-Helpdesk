@@ -271,9 +271,9 @@ async function overviewAnswer(ctx: Ctx) {
 
 /**
  * Whether `me` may open this ticket. Their own; for the IT team, what the
- * helpdesk's own ticket page lets them open (assigned to them, or unassigned in
- * a company they look after — any of those for an admin, anything for a super
- * admin); for HR, their own company's.
+ * helpdesk's own ticket page lets them open (any ticket of a company they look
+ * after, whoever it is assigned to — read only unless it is theirs; anything
+ * for a super admin); for HR, their own company's.
  */
 async function mayOpen(ctx: Ctx, ticket: { requester_id: string; assignee: string | null }) {
   const { me, org } = ctx
@@ -286,15 +286,19 @@ async function mayOpen(ctx: Ctx, ticket: { requester_id: string; assignee: strin
     .maybeSingle()
   const domain = requester ? domainOf(String(requester.email)) : ""
   if (!domain) return false
-  if (isStaff(me) && (isAdmin(me) || ticket.assignee === null)) {
+  if (isStaff(me)) {
     if ((await workDomains(ctx)).includes(domain)) return true
   }
   return ctx.hr && domain === org.domain
 }
 
-/** Whether `me` may write on a ticket they can open: its requester or the IT team, never HR alone. */
-export const mayWrite = (me: Person, ticket: { requester_id: string }) =>
-  ticket.requester_id === me.id || isStaff(me)
+/**
+ * Whether `me` may write on a ticket they can open: its requester, or the
+ * engineer it is assigned to. Other IT team members only read it until it is
+ * transferred to them; HR never writes.
+ */
+export const mayWrite = (me: Person, ticket: { requester_id: string; assignee?: string | null }) =>
+  ticket.requester_id === me.id || (isStaff(me) && !!ticket.assignee && ticket.assignee === me.id)
 
 export async function openTicket(ctx: Ctx, id: unknown) {
   const ticketId = String(id ?? "")
