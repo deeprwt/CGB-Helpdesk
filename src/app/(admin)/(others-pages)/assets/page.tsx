@@ -5,11 +5,8 @@ import * as XLSX from "xlsx"
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
 import { fetchAllRows } from "@/lib/fetch-all-rows"
-import {
-  getUserAccessibleDomains,
-  buildEmailDomainFilter,
-  type Organization,
-} from "@/lib/org"
+import { type Organization } from "@/lib/org"
+import { apiFetch, ApiError } from "@/lib/api-client"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 
@@ -193,7 +190,10 @@ type Asset = {
   warranty_expiry: string | null
   created_at: string | null
   organization_id: string | null
+  tenant_id: string | null
 }
+
+type Tenant = { id: string; name: string }
 
 type AssetRow = Asset & {
   assigned: boolean
@@ -206,7 +206,9 @@ const DEFAULT_PAGE_SIZE = 10
 /* ---------------- FILTERS ---------------- */
 
 const FACETS: { key: FacetKey; title: string; defaultOpen?: boolean }[] = [
-  { key: "org", title: "Organization", defaultOpen: true },
+  // Super admin only (see visibleFacets): the tenant the asset belongs to
+  { key: "tenant", title: "Organisation", defaultOpen: true },
+  { key: "org", title: "Company", defaultOpen: true },
   { key: "status", title: "Status", defaultOpen: true },
   { key: "type", title: "Asset Type", defaultOpen: true },
   { key: "location", title: "Location" },
@@ -216,6 +218,7 @@ const FACETS: { key: FacetKey; title: string; defaultOpen?: boolean }[] = [
 ]
 
 type FacetKey =
+  | "tenant"
   | "org"
   | "status"
   | "type"
@@ -227,6 +230,7 @@ type FacetKey =
 type Filters = Record<FacetKey, string[]>
 
 const EMPTY_FILTERS: Filters = {
+  tenant: [],
   org: [],
   status: [],
   type: [],
@@ -269,6 +273,7 @@ function warrantyBucket(expiry: string | null) {
 }
 
 const facetValue: Record<FacetKey, (r: AssetRow) => string> = {
+  tenant: (r) => r.tenant_id ?? "",
   org: (r) => r.organization_id ?? "",
   status: (r) => norm(r.status),
   type: (r) => norm(r.asset_type),
@@ -293,6 +298,8 @@ export default function AssetsPage() {
 
   const [assets, setAssets] = React.useState<AssetRow[]>([])
   const [orgs, setOrgs] = React.useState<Organization[]>([])
+  const [tenants, setTenants] = React.useState<Tenant[]>([])
+  const [myTenantId, setMyTenantId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
 
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS)
@@ -318,11 +325,12 @@ export default function AssetsPage() {
     } = await supabase.auth.getUser()
 
     if (!currentUser) { setLoading(false); return }
-    const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
-    const domains = await getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", profile?.role ?? "user")
+    const { data: profile } = await supabase.from("users").select("role, tenant_id").eq("id", currentUser.id).single()
+    const superAdmin = profile?.role === "superadmin"
 
+    // RLS scopes every read to the caller's tenant (a super admin sees all tenants).
     // fetchAllRows: Supabase returns max 1000 rows per request
-    const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }, { data: serials }] =
+    const [{ data: assets, error: assetsError }, { data: assignments }, { data: users }, { data: allOrgs }, { data: serials }, tenantRes] =
       await Promise.all([
         // "*" keeps the list working even before organization_id exists
         // (supabase/migration_asset_organization.sql not yet run)
@@ -344,17 +352,15 @@ export default function AssetsPage() {
             .range(from, to)
         ),
 
-        // Only look up users within accessible org(s)
         fetchAllRows((from, to) =>
           supabase
             .from("users")
             .select("id, email")
-            .or(buildEmailDomainFilter(domains))
             .order("id")
             .range(from, to)
         ),
 
-        supabase.from("organizations").select("id, name, domain").order("name"),
+        supabase.from("organizations").select("id, name, domain, status, tenant_id").order("name"),
 
         // Serial numbers live in asset_details (key = "serial_no"), used by search
         fetchAllRows((from, to) =>
@@ -365,6 +371,11 @@ export default function AssetsPage() {
             .order("id")
             .range(from, to)
         ),
+
+        // Tenant names, for the super admin's Organisation column
+        superAdmin
+          ? supabase.from("tenants").select("id, name").order("name")
+          : Promise.resolve({ data: [] as Tenant[] }),
       ])
 
     if (assetsError) {
@@ -391,12 +402,15 @@ export default function AssetsPage() {
     const rows: AssetRow[] = ((assets ?? []) as Asset[]).map((a) => ({
       ...a,
       organization_id: a.organization_id ?? null,
+      tenant_id: a.tenant_id ?? null,
       assigned: assignmentMap.has(a.id),
       assigned_email: assignmentMap.get(a.id) ?? null,
       serial_no: serialMap.get(a.id) ?? null,
     }))
 
     setOrgs((allOrgs ?? []) as Organization[])
+    setTenants((tenantRes.data ?? []) as Tenant[])
+    setMyTenantId(profile?.tenant_id ?? null)
     setAssets(rows)
     setLoading(false)
   }
@@ -406,9 +420,23 @@ export default function AssetsPage() {
   }, [])
 
   /* ---------------- FILTERING ---------------- */
+  const { user: me } = useCurrentUser()
+  const isSuperAdmin = me?.role === "superadmin"
+
   const orgNameMap = React.useMemo(
     () => new Map(orgs.map((o) => [o.id, o.name])),
     [orgs]
+  )
+
+  const tenantNameMap = React.useMemo(
+    () => new Map(tenants.map((t) => [t.id, t.name])),
+    [tenants]
+  )
+
+  // The Organisation (tenant) facet only matters to a super admin
+  const visibleFacets = React.useMemo(
+    () => FACETS.filter((f) => f.key !== "tenant" || isSuperAdmin),
+    [isSuperAdmin]
   )
 
   // Row matches every active filter, optionally ignoring one facet
@@ -437,6 +465,7 @@ export default function AssetsPage() {
           r.department,
           r.assigned_email,
           r.organization_id ? orgNameMap.get(r.organization_id) : null,
+          r.tenant_id ? tenantNameMap.get(r.tenant_id) : null,
         ]
           .join(" ")
           .toLowerCase()
@@ -445,7 +474,7 @@ export default function AssetsPage() {
 
       return true
     },
-    [filters, added, search, orgNameMap]
+    [filters, added, search, orgNameMap, tenantNameMap]
   )
 
   const filteredAssets = React.useMemo(
@@ -481,8 +510,10 @@ export default function AssetsPage() {
         count,
         label:
           key === "org"
-            ? orgNameMap.get(value) ?? "No organization"
-            : fixed?.[value] ?? labels.get(value) ?? value,
+            ? orgNameMap.get(value) ?? "No company"
+            : key === "tenant"
+              ? tenantNameMap.get(value) ?? "Unknown organisation"
+              : fixed?.[value] ?? labels.get(value) ?? value,
       }))
 
       if (fixed) {
@@ -500,7 +531,7 @@ export default function AssetsPage() {
     }
 
     return result
-  }, [assets, matches, orgNameMap])
+  }, [assets, matches, orgNameMap, tenantNameMap])
 
   const toggleFilter = (key: FacetKey, value: string) => {
     setFilters((prev) => {
@@ -521,7 +552,7 @@ export default function AssetsPage() {
   }
 
   const activeChips = [
-    ...FACETS.flatMap(({ key }) =>
+    ...visibleFacets.flatMap(({ key }) =>
       filters[key].map((value) => ({
         id: `${key}:${value}`,
         label:
@@ -580,43 +611,46 @@ export default function AssetsPage() {
   const [deleteId, setDeleteId] = React.useState<string | null>(null)
 
   const handleDeleteRow = async (id: string) => {
-    await supabase.from("asset_assignments").delete().eq("asset_id", id)
-    await supabase.from("asset_details").delete().eq("asset_id", id)
-    await supabase.from("assets").delete().eq("id", id)
-
-    toast.success("Asset deleted")
+    try {
+      await apiFetch(`/api/assets/${id}`, { method: "DELETE" })
+      toast.success("Asset deleted")
+    } catch (err) {
+      toast.error(`Failed to delete asset: ${err instanceof Error ? err.message : "Unexpected error"}`)
+    }
     loadAssets()
   }
 
   /* ---------------- DELETE (BULK, ADMINS ONLY) ---------------- */
-  const { user: me } = useCurrentUser()
   const canBulkDelete = me?.role === "admin" || me?.role === "superadmin"
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
 
-  // Same three deletes as a single row, run in chunks so the id list stays URL-safe
+  // POST /api/assets/bulk-delete takes at most 500 ids per call
   const handleBulkDelete = async () => {
     const ids = Array.from(selected)
     if (ids.length === 0) return
     const toastId = toast.loading(`Deleting ${ids.length} asset${ids.length === 1 ? "" : "s"}…`)
     let deleted = 0
     try {
-      for (let i = 0; i < ids.length; i += 100) {
-        const chunk = ids.slice(i, i + 100)
-        const r1 = await supabase.from("asset_assignments").delete().in("asset_id", chunk)
-        if (r1.error) throw r1.error
-        const r2 = await supabase.from("asset_details").delete().in("asset_id", chunk)
-        if (r2.error) throw r2.error
-        const r3 = await supabase.from("assets").delete().in("id", chunk)
-        if (r3.error) throw r3.error
-        deleted += chunk.length
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500)
+        const res = await apiFetch<{ deleted: number }>("/api/assets/bulk-delete", {
+          method: "POST",
+          body: { ids: chunk },
+        })
+        deleted += res.deleted
       }
-      toast.success(`Deleted ${deleted} asset${deleted === 1 ? "" : "s"}`, { id: toastId })
+      if (deleted === ids.length) {
+        toast.success(`Deleted ${deleted} asset${deleted === 1 ? "" : "s"}`, { id: toastId })
+      } else {
+        toast.warning(`Deleted ${deleted} of ${ids.length} assets; the rest were not found`, { id: toastId })
+      }
     } catch (err) {
       console.error("Bulk delete failed:", err)
+      const reason = err instanceof ApiError ? `: ${err.message}` : ""
       toast.error(
         deleted > 0
-          ? `Deleted ${deleted} of ${ids.length} assets, then an error stopped the rest`
-          : "Failed to delete the selected assets",
+          ? `Deleted ${deleted} of ${ids.length} assets, then an error stopped the rest${reason}`
+          : `Failed to delete the selected assets${reason}`,
         { id: toastId }
       )
     } finally {
@@ -682,7 +716,12 @@ export default function AssetsPage() {
     const rows = assets.map((a) => {
       const d = detailMap.get(a.id) ?? {}
       return {
-        organization: a.organization_id
+        // Super admin exports span tenants, so say which one each row is in
+        ...(isSuperAdmin
+          ? { organisation: a.tenant_id ? tenantNameMap.get(a.tenant_id) ?? "" : "" }
+          : {}),
+        // Same column name as the import template
+        company: a.organization_id
           ? orgNameMap.get(a.organization_id) ?? ""
           : "",
         asset_code: a.asset_code,
@@ -737,7 +776,9 @@ export default function AssetsPage() {
       icon: Boxes,
       hint: isFiltered
         ? `${filteredAssets.length.toLocaleString()} match current filters`
-        : "Across all organizations",
+        : isSuperAdmin
+          ? "Across all organisations"
+          : "Across all companies",
     },
     { label: "In Use", value: stats.inUse, icon: CircleCheck, hint: "Currently deployed" },
     { label: "Spare", value: stats.spare, icon: PackageOpen, hint: "Available to assign" },
@@ -826,9 +867,26 @@ export default function AssetsPage() {
         </StatusBadge>
       ),
     },
+    ...(isSuperAdmin
+      ? [
+        {
+          id: "tenant",
+          header: "Organisation",
+          cell: ({ row }) => {
+            const tenantId = row.original.tenant_id
+            const name = tenantId ? tenantNameMap.get(tenantId) : null
+            return name ? (
+              <StatusBadge tone="indigo">{name}</StatusBadge>
+            ) : (
+              <Dash />
+            )
+          },
+        } satisfies ColumnDef<AssetRow>,
+      ]
+      : []),
     {
       id: "organization",
-      header: "Organization",
+      header: "Company",
       cell: ({ row }) => {
         const orgId = row.original.organization_id
         const name = orgId ? orgNameMap.get(orgId) : null
@@ -915,7 +973,7 @@ export default function AssetsPage() {
   /* ---------------- FILTER SECTIONS (sidebar + mobile sheet) ---------------- */
   const filterSections = (
     <>
-      {FACETS.map((f) => (
+      {visibleFacets.map((f) => (
         <FacetFilter
           key={f.key}
           title={f.title}
@@ -1063,7 +1121,11 @@ export default function AssetsPage() {
           actions={
             <>
               {/* IMPORT */}
-              <AssetImportDialog orgs={orgs} onImported={loadAssets} />
+              <AssetImportDialog
+                tenants={isSuperAdmin ? tenants : []}
+                defaultTenantId={myTenantId}
+                onImported={loadAssets}
+              />
 
               {/* EXPORT */}
               <Dialog open={exportOpen} onOpenChange={setExportOpen}>

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
+import { apiFetch, ApiError } from "@/lib/api-client"
 
 const PUBLIC_ROUTES = [
   "/signin",
@@ -25,11 +26,13 @@ export default function AuthGate({
 
   const isPublicRoute = PUBLIC_ROUTES.includes(pathname)
   const [checking, setChecking] = useState(!isPublicRoute)
-  const [removed, setRemoved] = useState(false)
+  // Why the person was locked out: their account was removed, or their organisation is suspended
+  const [blocked, setBlocked] = useState<null | "removed" | "suspended">(null)
+  const removed = blocked !== null
 
   /** Sign out and redirect to login */
-  const forceLogout = useCallback(async () => {
-    setRemoved(true)
+  const forceLogout = useCallback(async (reason: "removed" | "suspended" = "removed") => {
+    setBlocked(reason)
     await supabase.auth.signOut().catch(() => {})
     // Small delay so user sees the message
     setTimeout(() => {
@@ -46,11 +49,27 @@ export default function AuthGate({
         .eq("id", userId)
         .maybeSingle()
 
-      if (error || !data) {
-        forceLogout()
-        return false
+      if (data) return true
+      if (error) {
+        // A failed request is not proof the account is gone; try again on the next check
+        console.error("AuthGate: profile check failed:", error.message)
+        return true
       }
-      return true
+
+      // The profile is hidden. While a tenant is suspended the database hides
+      // everything from its people (super admins excepted), including their
+      // own row, so ask the server which case this is.
+      let reason: "removed" | "suspended" = "removed"
+      try {
+        const me = await apiFetch<{ status: "ok" | "suspended" | "not_set_up" }>("/api/me")
+        if (me.status === "ok") return true
+        if (me.status === "suspended") reason = "suspended"
+      } catch (err) {
+        // Server unreachable: not proof the account is gone; check again later
+        if (!(err instanceof ApiError) || err.status >= 500) return true
+      }
+      forceLogout(reason)
+      return false
     },
     [forceLogout]
   )
@@ -88,7 +107,7 @@ export default function AuthGate({
               filter: `id=eq.${data.session.user.id}`,
             },
             () => {
-              forceLogout()
+              forceLogout("removed")
             }
           )
           .subscribe()
@@ -147,10 +166,12 @@ export default function AuthGate({
             </svg>
           </div>
           <h2 className="mb-2 text-xl font-bold text-red-800 dark:text-red-300">
-            Account Removed
+            {blocked === "suspended" ? "Access suspended" : "Account Removed"}
           </h2>
           <p className="text-sm text-red-700 dark:text-red-400">
-            Your account has been removed. Please contact your team.
+            {blocked === "suspended"
+              ? "Your organisation's access to the helpdesk is suspended. Please contact your IT provider."
+              : "Your account has been removed. Please contact your team."}
           </p>
           <p className="mt-3 text-xs text-red-500 dark:text-red-500">
             Redirecting to login...

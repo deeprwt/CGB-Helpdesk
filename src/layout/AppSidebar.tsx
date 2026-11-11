@@ -11,8 +11,8 @@ import {
   UserCircle2,
   Users,
   Boxes,
+  Building,
   Building2,
-  ShieldCheck,
   Link2,
   Plus,
   LogOut,
@@ -59,14 +59,14 @@ const NAV_SECTIONS: NavSection[] = [
       { name: "User Profile", icon: UserCircle2, path: "/profile", roles: ALL },
       { name: "User & Role", icon: Users, path: "/user", roles: STAFF },
       { name: "Assets", icon: Boxes, path: "/assets", roles: STAFF },
+      { name: "Companies", icon: Building2, path: "/companies", roles: ["admin", "superadmin"] },
       { name: "AskMiraa", icon: Link2, path: "/askmira", roles: ["admin", "superadmin"] },
     ],
   },
   {
     title: "Super Admin",
     items: [
-      { name: "Organizations", icon: Building2, path: "/super-admin/organizations", roles: ["superadmin"] },
-      { name: "Access Control", icon: ShieldCheck, path: "/super-admin/access-control", roles: ["superadmin"] },
+      { name: "Tenants", icon: Building, path: "/super-admin/tenants", roles: ["superadmin"] },
     ],
   },
 ];
@@ -109,6 +109,12 @@ const AppSidebar: React.FC = () => {
       <DropdownMenuLabel className="font-normal">
         <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{user?.full_name}</p>
         <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user?.email}</p>
+        {user?.tenant && (
+          <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+            <Building className="mr-1 inline h-3 w-3 align-[-2px]" />
+            {user.tenant.name}
+          </p>
+        )}
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
       <DropdownMenuItem asChild>
@@ -263,6 +269,11 @@ const AppSidebar: React.FC = () => {
                 <p className="truncate text-[11px] font-medium uppercase tracking-wider text-marigold-300">
                   {roleLabel(user.role)}
                 </p>
+                {user.tenant && (
+                  <p className="truncate text-[11px] text-white/60" title={user.tenant.name}>
+                    {user.tenant.name}
+                  </p>
+                )}
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

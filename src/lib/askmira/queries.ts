@@ -8,18 +8,18 @@
 // (core.actorIn). They see what the helpdesk itself shows them:
 //
 // * Its IT team (engineers, admins, super admins) see what its own screens show
-//   them: every organization's assets, as on the Assets page, and the tickets
-//   of the organizations they look after (lib/org.ts getStaffWorkDomains:
-//   every organization for a super admin; for anyone else their own company
-//   plus those granted under Access Control).
+//   them inside the connected company's tenant: every ticket and every asset
+//   of that tenant (all its client companies), as on the Tickets and Assets
+//   pages. Never another tenant's.
 // * HR in AskMiraa (actor role "admin") who are not on the IT team read their
-//   own company — the connected organization — and nothing else.
+//   own company — the people with `users.organization_id` = the connected
+//   organization, their tickets, and the company's assets — and nothing else.
 // * Everyone else: their own tickets and the assets they hold.
 //
 //   tickets  scope "mine"      tickets they raised
 //            scope "assigned"  tickets assigned to them                 IT team
-//            scope "queue"     unassigned tickets of their companies    IT team
-//            scope "company"   all tickets of their companies           IT team, HR
+//            scope "queue"     unassigned tickets of the tenant         IT team
+//            scope "company"   all tickets of the tenant (IT team) or of the company (HR)
 //   ticket   one ticket and its conversation, if they may open it
 //   overview counts for the scopes above that are theirs
 //   assets   scope "mine"      what is assigned to them now
@@ -28,7 +28,6 @@
 //
 // Lists take `limit` (at most 100) and `offset`, for paging.
 
-import { buildEmailDomainFilter, getStaffWorkDomains } from "@/lib/org"
 import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
 import {
   BRAND,
@@ -36,7 +35,6 @@ import {
   allRows,
   chunks,
   db,
-  domainOf,
   httpError,
   isStaff,
   searchText,
@@ -114,25 +112,16 @@ async function names(ids: (string | null | undefined)[]) {
   return out
 }
 
-/**
- * The email domains whose tickets this person works: for the IT team, the
- * organizations the helpdesk gives them (as its own queue does); for HR who are
- * not on it, their own company; for anyone else, none.
- */
-async function workDomains(ctx: Ctx): Promise<string[]> {
-  const { me, org } = ctx
-  if (isStaff(me)) {
-    // Same rule as the helpdesk: own company plus granted ones (all for super admins)
-    return getStaffWorkDomains(db(), me.id, me.email, me.role)
-  }
-  return ctx.hr ? [org.domain] : []
-}
-
-/** Everyone whose address is on one of `domains`: tickets belong to their requester's company. */
-async function peopleIn(domains: string[]): Promise<string[]> {
-  if (!domains.length) return []
+/** The company's people: whoever works for the connected organization here. */
+async function peopleOf(org: Organization): Promise<string[]> {
   const rows = await allRows<{ id: string }>((from, to) =>
-    db().from("users").select("id").or(buildEmailDomainFilter(domains)).order("id").range(from, to)
+    db()
+      .from("users")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("tenant_id", org.tenant_id)
+      .order("id")
+      .range(from, to)
   )
   return rows.map((r) => r.id)
 }
@@ -161,8 +150,10 @@ type TicketFilter = {
 }
 
 /**
- * Runs `shape` over the tickets in `scope`. Your own and your assigned tickets
- * are one request; a company's are one request per batch of its people.
+ * Runs `shape` over the tickets in `scope`, always inside the connected
+ * company's tenant. Your own, your assigned and (for the IT team) the tenant's
+ * tickets are one request; HR's company tickets are one request per batch of
+ * the company's people.
  */
 async function overTickets<T>(
   ctx: Ctx,
@@ -171,9 +162,9 @@ async function overTickets<T>(
   head: boolean,
   shape: (q: any) => PromiseLike<{ data: T[] | null; count: number | null; error: unknown }>
 ) {
-  const { me } = ctx
+  const { me, org } = ctx
   const base = () => {
-    let q = db().from("tickets").select(columns, { count: "exact", head })
+    let q = db().from("tickets").select(columns, { count: "exact", head }).eq("tenant_id", org.tenant_id)
     if (filter.scope === "mine") q = q.eq("requester_id", me.id)
     if (filter.scope === "assigned") q = q.eq("assignee", me.id)
     if (filter.scope === "queue") q = q.is("assignee", null)
@@ -187,9 +178,11 @@ async function overTickets<T>(
     return q
   }
   const batches: (string[] | null)[] =
-    filter.scope === "mine" || filter.scope === "assigned"
+    filter.scope === "mine" || filter.scope === "assigned" || isStaff(me)
       ? [null]
-      : [...chunks(await peopleIn(await workDomains(ctx)), ID_CHUNK)]
+      : ctx.hr
+        ? [...chunks(await peopleOf(org), ID_CHUNK)]
+        : []
   const results: { data: T[]; count: number }[] = []
   for (const batch of batches) {
     const { data, count, error } = await shape(batch ? base().in("requester_id", batch) : base())
@@ -269,26 +262,25 @@ async function overviewAnswer(ctx: Ctx) {
 }
 
 /**
- * Whether `me` may open this ticket. Their own; for the IT team, what the
- * helpdesk's own ticket page lets them open (any ticket of a company they look
- * after, whoever it is assigned to — read only unless it is theirs; anything
- * for a super admin); for HR, their own company's.
+ * Whether `me` may open this ticket. Only tickets of the connected company's
+ * tenant, and of those: their own; for the IT team, any (as the helpdesk's own
+ * ticket page — read only unless it is theirs); for HR, those raised by the
+ * company's people.
  */
-async function mayOpen(ctx: Ctx, ticket: { requester_id: string; assignee: string | null }) {
+async function mayOpen(
+  ctx: Ctx,
+  ticket: { tenant_id: string | null; requester_id: string; assignee: string | null }
+) {
   const { me, org } = ctx
-  if (ticket.requester_id === me.id || me.role === "superadmin") return true
-  if (isStaff(me) && ticket.assignee === me.id) return true
+  if (!ticket.tenant_id || ticket.tenant_id !== org.tenant_id) return false
+  if (ticket.requester_id === me.id || isStaff(me)) return true
+  if (!ctx.hr) return false
   const { data: requester } = await db()
     .from("users")
-    .select("email")
+    .select("organization_id, tenant_id")
     .eq("id", ticket.requester_id)
     .maybeSingle()
-  const domain = requester ? domainOf(String(requester.email)) : ""
-  if (!domain) return false
-  if (isStaff(me)) {
-    if ((await workDomains(ctx)).includes(domain)) return true
-  }
-  return ctx.hr && domain === org.domain
+  return Boolean(requester && requester.organization_id === org.id && requester.tenant_id === org.tenant_id)
 }
 
 /**
@@ -306,7 +298,7 @@ export async function openTicket(ctx: Ctx, id: unknown) {
   if (!UUID_RE.test(ticketId)) throw missing
   const { data: ticket } = await db().from("tickets").select("*").eq("id", ticketId).maybeSingle()
   if (!ticket || !(await mayOpen(ctx, ticket))) throw missing
-  return ticket as TicketRow & Record<string, unknown>
+  return ticket as TicketRow & { tenant_id: string } & Record<string, unknown>
 }
 
 async function ticketAnswer(ctx: Ctx) {
@@ -476,24 +468,29 @@ async function assetsAnswer(ctx: Ctx) {
   if (!isStaff(me) && !ctx.hr) {
     throw httpError(403, `Only ${BRAND}'s IT team and your HR see the asset register.`)
   }
-  const { data: orgRows } = await db().from("organizations").select("id, name, domain")
-  const orgs = (orgRows ?? []) as Organization[]
+  // The tenant's companies: names for the register, and for searching it.
+  const { data: orgRows } = await db()
+    .from("organizations")
+    .select("id, name, domain")
+    .eq("tenant_id", org.tenant_id)
+  const orgs = (orgRows ?? []) as Pick<Organization, "id" | "name" | "domain">[]
   const orgName = new Map(orgs.map((o) => [o.id, o.name]))
 
   let q = db()
     .from("assets")
     .select(`${ASSET_COLUMNS}, organization_id`, { count: "exact" })
+    .eq("tenant_id", org.tenant_id)
     .order("asset_code")
     .order("id")
     .range(offset, offset + limit - 1)
-  // The IT team sees every organization's assets, as on the helpdesk's own
+  // The IT team sees every asset of the tenant, as on the helpdesk's own
   // Assets page; HR who are not on it see their own company's.
   if (!isStaff(me)) q = q.eq("organization_id", org.id)
   if (status) q = q.eq("status", status)
   if (search) {
     const s = search.toLowerCase()
     const matching = orgs
-      .filter((o) => o.name.toLowerCase().includes(s) || String(o.domain).toLowerCase().includes(s))
+      .filter((o) => o.name.toLowerCase().includes(s) || (o.domain ?? "").toLowerCase().includes(s))
       .map((o) => o.id)
     const any = [`asset_code.ilike.*${search}*`, `asset_type.ilike.*${search}*`, `model.ilike.*${search}*`]
     if (matching.length) any.push(`organization_id.in.(${matching.join(",")})`)

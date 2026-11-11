@@ -12,7 +12,6 @@ import {
 import { StatCard, StatCardSkeleton, type StatTone } from "@/components/common/stat-card"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabaseClient"
-import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 type Role = "user" | "engineer" | "admin" | "superadmin"
 
@@ -105,24 +104,11 @@ export default function TicketOverviewCards() {
       }
 
       /* ----------------------------
-         ENGINEER / ADMIN STATS — scoped to this org only
+         ENGINEER / ADMIN STATS — scoped to this tenant by RLS
       ---------------------------- */
       if (role === "engineer" || role === "admin" || role === "superadmin") {
-        const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", role)
-        const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
-
-        if (orgUserIds.length === 0) {
-          setStats([
-            { label: "Total Tickets", value: 0 },
-            { label: "New in Queue", value: 0 },
-            { label: "Open (Assigned)", value: 0 },
-            { label: "Hold Tickets", value: 0 },
-            { label: "Closed (Resolved)", value: 0 },
-          ])
-          setLoading(false)
-          return
-        }
-
+        // The database (RLS) limits these counts to this person's tenant
+        // (every tenant for a super admin).
         const [
           total,
           queueNew,
@@ -130,17 +116,15 @@ export default function TicketOverviewCards() {
           hold,
           closedAssigned,
         ] = await Promise.all([
-          // All tickets raised by anyone in this org
+          // All tickets this person can see
           supabase
             .from("tickets")
-            .select("id", { count: "exact", head: true })
-            .in("requester_id", orgUserIds),
+            .select("id", { count: "exact", head: true }),
 
-          // New unassigned tickets from this org
+          // New unassigned tickets
           supabase
             .from("tickets")
             .select("id", { count: "exact", head: true })
-            .in("requester_id", orgUserIds)
             .is("assignee", null)
             .eq("status", "new"),
 

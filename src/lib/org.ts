@@ -1,263 +1,75 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { fetchAllRows } from "@/lib/fetch-all-rows"
 
-/**
- * Extracts the organisation domain from an email address.
- * e.g. "user@cgbindia.com" → "cgbindia.com"
- */
-export function extractOrgDomain(email: string): string {
-  return email.split("@")[1]?.toLowerCase() ?? ""
-}
-
-/**
- * Returns the IDs of every user whose email belongs to `domain`.
- * Used for client-side multi-tenant filtering.
- */
-export async function getOrgUserIds(
-  supabase: SupabaseClient,
-  domain: string
-): Promise<string[]> {
-  if (!domain) return []
-
-  // Paged: a plain select stops at Supabase's max rows (1000)
-  const { data, error } = await fetchAllRows<{ id: string }>((from, to) =>
-    supabase
-      .from("users")
-      .select("id")
-      .ilike("email", `%@${domain}`)
-      .order("id")
-      .range(from, to)
-  )
-
-  if (error && data.length === 0) return []
-  return data.map((u) => u.id)
-}
-
-/* ─────────────────────────────────────────────────────────
-   Multi-Organization helpers (Super Admin feature)
-   ───────────────────────────────────────────────────────── */
-
-/**
- * Returns ALL domains a user is allowed to access.
+/*
+ * Tenancy helpers.
  *
- * - superadmin  → every active organization domain
- * - admin/engineer with cross-org → domains from user_organization_access
- * - default      → just their own email domain
+ * Every person, ticket and asset carries a `tenant_id`. The database (RLS)
+ * already limits what a browser session can read to its own tenant, so client
+ * code never filters by tenant or email domain itself.
  *
- * Gracefully falls back to single-domain if the `organizations`
- * or `user_organization_access` tables don't exist yet.
+ * "Organizations" are client companies inside a tenant: a label for grouping
+ * people and assets, not an access boundary.
  */
-export async function getUserAccessibleDomains(
-  supabase: SupabaseClient,
-  userId: string,
-  userEmail: string,
-  userRole: string
-): Promise<string[]> {
-  /* ── Super Admin: all active org domains ─────────── */
-  if (userRole === "superadmin") {
-    const { data, error } = await supabase
-      .from("organizations")
-      .select("domain")
-      .eq("status", "active")
 
-    if (!error && data && data.length > 0) {
-      return data.map((o: { domain: string }) => o.domain)
-    }
-    // Fallback if table doesn't exist yet
-    return [extractOrgDomain(userEmail)]
-  }
-
-  /* ── Check user_organization_access ──────────────── */
-  const { data: accessData, error: accessError } = await supabase
-    .from("user_organization_access")
-    .select("organization:organization_id (domain)")
-    .eq("user_id", userId)
-
-  if (!accessError && accessData && accessData.length > 0) {
-    const domains = accessData
-      .map((a: any) => {
-        const org = Array.isArray(a.organization)
-          ? a.organization[0]
-          : a.organization
-        return org?.domain as string | undefined
-      })
-      .filter(Boolean) as string[]
-
-    if (domains.length > 0) return domains
-  }
-
-  /* ── Fallback: single email domain ──────────────── */
-  return [extractOrgDomain(userEmail)]
-}
-
+/** A client company inside a tenant. */
 export type Organization = {
   id: string
   name: string
-  domain: string
+  domain?: string | null
+  status?: string
+  tenant_id?: string
 }
 
-/**
- * Returns the organization records a user is allowed to access
- * (same rules as getUserAccessibleDomains), sorted by name.
- */
-export async function getUserAccessibleOrganizations(
-  supabase: SupabaseClient,
-  userId: string,
-  userEmail: string,
-  userRole: string
-): Promise<Organization[]> {
-  const domains = await getUserAccessibleDomains(
-    supabase,
-    userId,
-    userEmail,
-    userRole
-  )
-
-  const { data, error } = await supabase
-    .from("organizations")
-    .select("id, name, domain")
-    .in("domain", domains)
-    .order("name")
-
-  if (error) return []
-  return (data ?? []) as Organization[]
-}
-
-/**
- * Returns user IDs across multiple organisation domains.
- * Used for cross-org ticket filtering when an admin has
- * access to several organizations.
- */
-export async function getOrgUserIdsByDomains(
-  supabase: SupabaseClient,
-  domains: string[]
-): Promise<string[]> {
-  if (domains.length === 0) return []
-
-  // Optimise single-domain case (most common)
-  if (domains.length === 1) {
-    return getOrgUserIds(supabase, domains[0])
-  }
-
-  const orFilter = domains.map((d) => `email.ilike.%@${d}`).join(",")
-
-  // Paged: a plain select stops at Supabase's max rows (1000)
-  const { data, error } = await fetchAllRows<{ id: string }>((from, to) =>
-    supabase.from("users").select("id").or(orFilter).order("id").range(from, to)
-  )
-
-  if (error && data.length === 0) return []
-  return data.map((u) => u.id)
-}
-
-/** Splits a list into chunks, e.g. user IDs for `.in()` filters that must keep the URL short. */
+/** Splits a list into chunks, e.g. IDs for `.in()` filters that must keep the URL short. */
 export function chunkList<T>(items: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
   return out
 }
 
-/**
- * Builds a PostgREST `.or()` filter string for matching
- * user emails across multiple org domains.
- *
- * Usage: `query.or(buildEmailDomainFilter(domains))`
- */
-export function buildEmailDomainFilter(domains: string[]): string {
-  return domains.map((d) => `email.ilike.%@${d}`).join(",")
-}
-
 /* ─────────────────────────────────────────────────────────
-   Ticket notification recipients
+   Ticket notification recipients (server)
    ───────────────────────────────────────────────────────── */
 
-export type TicketAdmin = {
+export type TicketStaff = {
   id: string
   email: string | null
   name: string | null
   role: string
+  tenant_id: string
 }
 
-/** Same shape as TicketAdmin, for any IT role (engineer, admin, superadmin). */
-export type TicketStaff = TicketAdmin
+/** Kept for existing imports. */
+export type TicketAdmin = TicketStaff
 
 /**
- * Domains an IT team member works on: the ones from getUserAccessibleDomains
- * plus their own email domain, so tickets raised inside their own company
- * (including their own tickets) are never hidden from them.
- */
-export async function getStaffWorkDomains(
-  supabase: SupabaseClient,
-  userId: string,
-  userEmail: string,
-  userRole: string
-): Promise<string[]> {
-  const domains = await getUserAccessibleDomains(supabase, userId, userEmail, userRole)
-  const own = extractOrgDomain(userEmail)
-  return [...new Set([...domains, own].map((d) => d.toLowerCase()).filter(Boolean))]
-}
-
-/**
- * Admins who should hear about a ticket: every superadmin, plus admins whose
- * email domain is the requester's organization or who were granted access to
- * it (Super Admin → Access Control). Same rule AskMiraa uses.
- *
- * Loads admins and grants once and returns a picker, so loops over many
- * tickets (e.g. the SLA check) don't re-query per ticket.
- */
-export async function loadTicketAdminPicker(
-  supabase: SupabaseClient
-): Promise<(requesterEmail: string | null | undefined) => TicketAdmin[]> {
-  return loadTicketStaffPicker(supabase, ["admin", "superadmin"])
-}
-
-/**
- * Like loadTicketAdminPicker, for any set of IT roles. With the default roles
- * it returns the whole IT team looking after the requester's organization:
- * engineers and admins of that domain or granted access to it, and every
- * superadmin.
+ * Loads the IT team once and returns a picker: the people with one of `roles`
+ * in a given tenant. Loops over many tickets (e.g. the SLA check) reuse it.
  */
 export async function loadTicketStaffPicker(
   supabase: SupabaseClient,
   roles: string[] = ["engineer", "admin", "superadmin"]
-): Promise<(requesterEmail: string | null | undefined) => TicketStaff[]> {
-  const [{ data: admins }, { data: orgs }, { data: access }] = await Promise.all([
-    supabase
-      .from("users")
-      .select("id, email, name:full_name, role")
-      .in("role", roles),
-    supabase.from("organizations").select("id, domain"),
-    fetchAllRows<{ user_id: string; organization_id: string }>((from, to) =>
-      supabase
-        .from("user_organization_access")
-        .select("user_id, organization_id")
-        .order("id")
-        .range(from, to)
-    ),
-  ])
+): Promise<(tenantId: string | null | undefined) => TicketStaff[]> {
+  const { data } = await supabase
+    .from("users")
+    .select("id, email, name:full_name, role, tenant_id")
+    .in("role", roles)
 
-  const orgIdByDomain = new Map(
-    (orgs ?? []).map((o: { id: string; domain: string }) => [o.domain, o.id])
-  )
-  const grants = new Set(access.map((a) => `${a.user_id}:${a.organization_id}`))
-
-  return (requesterEmail) => {
-    const domain = extractOrgDomain(requesterEmail ?? "")
-    const orgId = orgIdByDomain.get(domain)
-    return ((admins ?? []) as TicketStaff[]).filter(
-      (a) =>
-        a.role === "superadmin" ||
-        (!!domain && extractOrgDomain(a.email ?? "") === domain) ||
-        (!!orgId && grants.has(`${a.id}:${orgId}`))
-    )
-  }
+  const staff = (data ?? []) as TicketStaff[]
+  return (tenantId) => (tenantId ? staff.filter((s) => s.tenant_id === tenantId) : [])
 }
 
-/** Admins to notify about a ticket raised by `requesterEmail`. */
+/** Admins (and super admins) of a tenant, for escalations and SLA alerts. */
+export async function loadTicketAdminPicker(
+  supabase: SupabaseClient
+): Promise<(tenantId: string | null | undefined) => TicketAdmin[]> {
+  return loadTicketStaffPicker(supabase, ["admin", "superadmin"])
+}
+
 export async function getTicketAdmins(
   supabase: SupabaseClient,
-  requesterEmail: string | null | undefined
+  tenantId: string | null | undefined
 ): Promise<TicketAdmin[]> {
   const pick = await loadTicketAdminPicker(supabase)
-  return pick(requesterEmail)
+  return pick(tenantId)
 }

@@ -9,6 +9,9 @@
 // 3. AskMiraa's server swaps the code and the verifier — which only it holds —
 //    for the organization's own secret (`swap`).
 //
+// An admin here connects only companies of their own tenant; a super admin
+// any company of any tenant.
+//
 // The secret reaches that one organization only. Either side can disconnect:
 // AskMiraa from its Connectors (`revoke`), an admin here from the AskMiraa page
 // (`disconnect`).
@@ -16,10 +19,11 @@
 import crypto from "crypto"
 import {
   BRAND,
+  ORGANIZATION_COLUMNS,
   PERSON_COLUMNS,
   PRODUCT,
   UUID_RE,
-  belongsTo,
+  asOrganization,
   canConnect,
   clean,
   db,
@@ -28,6 +32,7 @@ import {
   SETUP_MESSAGE,
   sha256hex,
   tablesReady,
+  tenantActive,
   type Organization,
   type Person,
 } from "./core"
@@ -53,24 +58,35 @@ function requireAdmin(me: Person) {
   }
 }
 
-/** The organizations this admin looks after: every active one for a super admin. */
-async function organizationsOf(me: Person): Promise<Organization[]> {
-  const { data } = await db()
-    .from("organizations")
-    .select("id, name, domain, status")
-    .eq("status", "active")
-    .order("name")
-  const all = (data ?? []).map((o) => ({ ...o, domain: String(o.domain).toLowerCase() }))
-  if (me.role === "superadmin") return all
-  const mine: Organization[] = []
-  for (const org of all) if (await belongsTo(me, org)) mine.push(org)
-  return mine
+type Company = Organization & { tenant_name: string | null }
+
+/**
+ * The companies this admin may connect: the active companies of their own
+ * tenant; for a super admin, every tenant's (labelled with the tenant's name).
+ */
+async function organizationsOf(me: Person): Promise<Company[]> {
+  if (me.role !== "superadmin") {
+    if (!me.tenant_id || !(await tenantActive(me.tenant_id))) {
+      throw httpError(403, "Your organisation's access is suspended. Contact your provider.")
+    }
+  }
+  let q = db().from("organizations").select(ORGANIZATION_COLUMNS).eq("status", "active").order("name")
+  if (me.role !== "superadmin") q = q.eq("tenant_id", me.tenant_id)
+  const { data, error } = await q
+  if (error) throw error
+  const orgs = (data ?? []).filter((o) => o.tenant_id).map((o) => asOrganization(o))
+  const tenantIds = [...new Set(orgs.map((o) => o.tenant_id))]
+  const { data: tenants } = tenantIds.length
+    ? await db().from("tenants").select("id, name").in("id", tenantIds)
+    : { data: [] }
+  const tenantName = new Map((tenants ?? []).map((t) => [t.id as string, t.name as string]))
+  return orgs.map((o) => ({ ...o, tenant_name: tenantName.get(o.tenant_id) ?? null }))
 }
 
 async function organizationFor(me: Person, organizationId: unknown) {
   const id = String(organizationId ?? "")
   const org = UUID_RE.test(id) ? (await organizationsOf(me)).find((o) => o.id === id) : undefined
-  if (!org) throw httpError(403, "You don't look after that company here.")
+  if (!org) throw httpError(403, "That company is not one of your organisation's companies here.")
   return org
 }
 
@@ -128,6 +144,10 @@ export async function connections(me: Person) {
         id: o.id,
         name: o.name,
         domain: o.domain,
+        // Shown to a super admin, who sees every tenant's companies.
+        tenant_name: me.role === "superadmin" ? o.tenant_name : null,
+        // The company the admin works for: the one offered first.
+        mine: o.id === me.organization_id,
         connected: Boolean(link),
         askmira_workspace_id: link?.askmira_tenant_id ?? null,
         askmira_workspace: link?.askmira_name ?? null,
@@ -180,7 +200,7 @@ export async function approve(me: Person, body: Record<string, unknown>) {
     expires_at: new Date(Date.now() + CODE_LIFETIME_MS).toISOString(),
   })
   if (error) throw error
-  console.log(`[AskMiraa] ${org.domain} approved a connection to workspace ${tenantId} at ${callback.origin}`)
+  console.log(`[AskMiraa] ${org.name} (${org.id}) approved a connection to workspace ${tenantId} at ${callback.origin}`)
   const query = new URLSearchParams({ code, state, product: PRODUCT })
   return { redirect_to: `${callback.origin}${CALLBACK_PATH}?${query}` }
 }
@@ -263,6 +283,6 @@ export async function disconnect(me: Person, organizationId: unknown) {
   requireAdmin(me)
   const org = await organizationFor(me, organizationId)
   await db().from("askmira_links").delete().eq("organization_id", org.id)
-  console.log(`[AskMiraa] ${org.domain} disconnected by ${me.email}`)
+  console.log(`[AskMiraa] ${org.name} (${org.id}) disconnected by ${me.email}`)
   return connections(me)
 }

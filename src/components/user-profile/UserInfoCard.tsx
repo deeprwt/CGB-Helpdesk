@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { apiFetch } from "@/lib/api-client"
 import {
   Dialog,
   DialogContent,
@@ -27,12 +28,20 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
+  FieldDescription,
 } from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageHeader, type PageHeaderMetaItem } from "@/components/common/page-header"
 import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
-import { getInitials, roleLabel } from "@/hooks/useCurrentUser"
+import { getInitials, roleLabel, useCompanyList, useCurrentUser } from "@/hooks/useCurrentUser"
 import { IdCard, Loader2, Pencil, UserCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -58,7 +67,17 @@ type UserProfile = {
   postal_code: string | null
   country: string | null
   avatar_url: string | null
+  tenant_id: string | null
+  organization_id: string | null
 }
+
+const NO_COMPANY = "__none__"
+
+/** Fields saved from the edit form (people may write these on their own row) */
+const EDITABLE_FIELDS = [
+  "full_name", "employee_id", "designation", "department", "position", "manager", "phone",
+  "present_address", "permanent_address", "city", "postal_code", "country",
+] as const
 
 type UserInfoCardProps = {
   profileId?: string
@@ -126,8 +145,16 @@ export default function UserInfoCard({
   const [profile, setProfile] =
     React.useState<UserProfile | null>(null)
 
-  const [currentUserId, setCurrentUserId] =
-    React.useState<string>("")
+  const { user: me } = useCurrentUser()
+  const currentUserId = me?.id ?? ""
+  // Prefer the live role; the prop is what the page already loaded
+  const viewerRole: Role | null = me?.role ?? currentRole ?? null
+
+  // Names shown for the person's company and tenant
+  const [companyName, setCompanyName] = React.useState<string | null>(null)
+  const [tenantName, setTenantName] = React.useState<string | null>(null)
+  // Company picked in the edit form
+  const [companyChoice, setCompanyChoice] = React.useState(NO_COMPANY)
 
   /* ---------------- LOAD PROFILE ---------------- */
 
@@ -139,9 +166,6 @@ export default function UserInfoCard({
 
       if (!user) return
 
-      setCurrentUserId(user.id)
-
-      // ✅ CRITICAL FIX: safe target id
       const targetId = profileId ?? user.id
 
       const { data, error } = await supabase
@@ -157,6 +181,17 @@ export default function UserInfoCard({
       }
 
       setProfile(data)
+
+      const [{ data: org }, { data: tenant }] = await Promise.all([
+        data.organization_id
+          ? supabase.from("organizations").select("name").eq("id", data.organization_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+        data.tenant_id
+          ? supabase.from("tenants").select("name").eq("id", data.tenant_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ])
+      setCompanyName((org as { name: string } | null)?.name ?? null)
+      setTenantName((tenant as { name: string } | null)?.name ?? null)
     }
 
     loadProfile()
@@ -164,25 +199,21 @@ export default function UserInfoCard({
 
   /* ---------------- PERMISSIONS ---------------- */
 
-  const canEdit =
-    profile &&
-    (
-      // own profile
-      profile.id === currentUserId ||
+  const isOwn = !!profile && profile.id === currentUserId
 
-      // superadmin → everyone except other superadmins
-      (currentRole === "superadmin" &&
-        profile.role !== "superadmin") ||
+  // Same rules as PATCH /api/users/:id: admins edit members of their tenant
+  // (not super admins); super admins edit anyone. Everyone edits themselves.
+  const canAdminister =
+    !!profile &&
+    (viewerRole === "superadmin" ||
+      (viewerRole === "admin" && profile.role !== "superadmin"))
 
-      // admin → user + engineer
-      (currentRole === "admin" &&
-        (profile.role === "user" ||
-          profile.role === "engineer")) ||
+  const canEdit = !!profile && (isOwn || canAdminister)
 
-      // engineer → user
-      (currentRole === "engineer" &&
-        profile.role === "user")
-    )
+  // Only admins move people between companies
+  const companies = useCompanyList(
+    canAdminister && open ? (viewerRole === "superadmin" ? profile?.tenant_id ?? null : undefined) : null
+  )
 
   /* ---------------- HANDLERS ---------------- */
 
@@ -196,41 +227,54 @@ export default function UserInfoCard({
     })
   }
 
+  const openEditor = () => {
+    setCompanyChoice(profile?.organization_id ?? NO_COMPANY)
+    setOpen(true)
+  }
+
   const handleSave = async () => {
     if (!profile || !canEdit) {
       toast.error("Unauthorized action")
       return
     }
-
-    setLoading(true)
-
-    const { error } = await supabase
-      .from("users")
-      .update({
-        full_name: profile.full_name,
-        employee_id: profile.employee_id,
-        designation: profile.designation,
-        department: profile.department,
-        position: profile.position,
-        manager: profile.manager,
-        phone: profile.phone,
-        present_address: profile.present_address,
-        permanent_address: profile.permanent_address,
-        city: profile.city,
-        postal_code: profile.postal_code,
-        country: profile.country,
-      })
-      .eq("id", profile.id)
-
-    setLoading(false)
-
-    if (error) {
-      toast.error(error.message)
+    if (!profile.full_name?.trim()) {
+      toast.error("Name cannot be empty")
       return
     }
 
-    toast.success("Profile updated successfully")
-    setOpen(false)
+    const fields: Record<string, string | null> = {}
+    for (const f of EDITABLE_FIELDS) {
+      const v = (profile as Record<string, unknown>)[f]
+      fields[f] = typeof v === "string" ? v.trim() || null : null
+    }
+    const nextCompany = companyChoice === NO_COMPANY ? null : companyChoice
+    const companyChanged = canAdminister && nextCompany !== (profile.organization_id ?? null)
+
+    setLoading(true)
+    try {
+      if (isOwn && !companyChanged) {
+        // Your own row: the database lets you update these columns directly
+        const { error } = await supabase.from("users").update(fields).eq("id", profile.id)
+        if (error) throw new Error(error.message)
+      } else {
+        // Someone else (or a company change): the server checks the admin's rights
+        await apiFetch(`/api/users/${profile.id}`, {
+          method: "PATCH",
+          body: { ...fields, ...(companyChanged ? { organization_id: nextCompany } : {}) },
+        })
+      }
+
+      if (companyChanged) {
+        setProfile({ ...profile, organization_id: nextCompany })
+        setCompanyName(companies.find((c) => c.id === nextCompany)?.name ?? null)
+      }
+      toast.success("Profile updated successfully")
+      setOpen(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the profile")
+    } finally {
+      setLoading(false)
+    }
   }
 
   /* ---------------- LOADING ---------------- */
@@ -267,7 +311,7 @@ export default function UserInfoCard({
 
   /* ---------------- UI ---------------- */
 
-  const isOwnProfile = profile.id === currentUserId
+  const isOwnProfile = isOwn
   const location = [profile.city, profile.country].filter(Boolean).join(", ")
   const subtitle = [profile.designation, profile.department].filter(Boolean).join(" · ")
 
@@ -322,7 +366,7 @@ export default function UserInfoCard({
           </CardDescription>
           {canEdit && (
             <CardAction>
-              <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+              <Button variant="outline" size="sm" onClick={openEditor}>
                 <Pencil className="h-4 w-4" />
                 Edit
               </Button>
@@ -340,6 +384,8 @@ export default function UserInfoCard({
             <InfoItem label="Designation" value={profile.designation} />
             <InfoItem label="Position" value={profile.position} />
             <InfoItem label="Manager" value={profile.manager} />
+            <InfoItem label="Company" value={companyName} />
+            <InfoItem label="Organisation" value={tenantName} />
           </dl>
         </CardContent>
       </Card>
@@ -369,6 +415,28 @@ export default function UserInfoCard({
                     />
                   </Field>
                 ))}
+                {canAdminister && (
+                  <Field>
+                    <FieldLabel htmlFor="profile-company">Company</FieldLabel>
+                    <Select value={companyChoice} onValueChange={setCompanyChoice}>
+                      <SelectTrigger id="profile-company" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_COMPANY}>No company</SelectItem>
+                        {companies
+                          .filter((c) => c.status === "active" || c.id === profile.organization_id)
+                          .map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                              {c.status !== "active" ? " (inactive)" : ""}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>For grouping only; it doesn&apos;t change what they can see.</FieldDescription>
+                  </Field>
+                )}
               </FieldGroup>
             </FieldSet>
 

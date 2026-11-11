@@ -101,7 +101,7 @@ export default function RoleBasedTickets() {
 
   if (role === "user") return <UserLatestTickets />
 
-  // engineer, admin, superadmin → show all org tickets
+  // engineer, admin, superadmin → every ticket of their tenant (RLS; super admin: all tenants)
   if (role === "engineer" || role === "admin" || role === "superadmin") {
     return <EngineerTicketTable />
   }

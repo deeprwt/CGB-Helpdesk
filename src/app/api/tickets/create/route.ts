@@ -1,206 +1,157 @@
 import { NextResponse, after } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { randomUUID } from "crypto"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
+import { inTenant, jsonError, loadPerson, requireActor, text, UUID_RE } from "@/lib/ticket-server"
+import { isStaffRole } from "@/lib/ticket-access"
+import { PRIORITIES } from "@/lib/ticket-categories"
 
 export const runtime = "nodejs"
 
+const MAX_FILES = 5
+const MAX_FILE_BYTES = 10 * 1024 * 1024
+const ALLOWED_TYPES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp",
+  "application/pdf", "text/plain", "text/csv",
+  "application/zip", "application/x-zip-compressed",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-outlook", "message/rfc822",
+])
+
+/** File name safe to put in a storage key. */
+function safeName(name: string) {
+  const cleaned = name.normalize("NFKD").replace(/[^\w.\-]+/g, "_").replace(/^\.+/, "")
+  return (cleaned || "file").slice(-120)
+}
+
+/**
+ * POST /api/tickets/create  (multipart form)
+ * A ticket always belongs to its requester's tenant. Staff may raise one for
+ * someone else in their own tenant (a super admin: in any tenant).
+ */
 export async function POST(req: Request) {
   try {
-    /* -----------------------------------
-       1️⃣ Validate Authorization header
-    ----------------------------------- */
-    const authHeader =
-      req.headers.get("authorization") ??
-      req.headers.get("Authorization")
+    const ctx = await requireActor(req)
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const accessToken = authHeader.replace("Bearer ", "")
-
-    /* -----------------------------------
-       2️⃣ User-auth client (token-based)
-    ----------------------------------- */
-    const supabaseAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-        auth: {
-          persistSession: false,
-        },
-      }
-    )
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseAuth.auth.getUser()
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    /* -----------------------------------
-       3️⃣ Admin client (service role)
-    ----------------------------------- */
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false },
-      }
-    )
-
-    /* -----------------------------------
-       4️⃣ Read form data
-    ----------------------------------- */
     const formData = await req.formData()
-    const files = formData.getAll("attachments") as File[]
 
-    // Only staff may raise a ticket on someone else's behalf; a regular
-    // user's ticket (and its confirmation email) always belongs to them
-    const { data: creator } = await supabaseAdmin
-      .from("users")
-      .select("role")
-      .eq("id", user.id)
-      .single()
+    /* Requester: yourself, or (staff only) someone in a tenant you work */
+    const askedFor = formData.get("requester_id")?.toString() || me.id
+    let requester = me
+    if (askedFor !== me.id) {
+      if (!isStaffRole(me.role)) return jsonError("Only the IT team can raise tickets for someone else", 403)
+      if (!UUID_RE.test(askedFor)) return jsonError("Requester not found", 400)
+      const other = await loadPerson(db, askedFor)
+      if (!other || !inTenant(me, other.tenant_id)) return jsonError("Requester not found", 400)
+      requester = other
+    }
+    const tenantId = requester.tenant_id
 
-    const requesterId =
-      creator && creator.role !== "user"
-        ? formData.get("requester_id")?.toString() || user.id
-        : user.id
+    const subject = text(formData.get("subject")?.toString(), 200)
+    if (!subject) return jsonError("A subject is required", 400)
+    const priorityRaw = formData.get("priority")?.toString() ?? ""
+    const priority = (PRIORITIES as readonly string[]).includes(priorityRaw) ? priorityRaw : "medium"
 
-    const { data: requester } = await supabaseAdmin
-      .from("users")
-      .select("email, full_name")
-      .eq("id", requesterId)
-      .single()
-
-    if (!requester) {
-      return NextResponse.json(
-        { error: "Requester not found" },
-        { status: 400 }
-      )
+    /* Asset: must be in the ticket's tenant, and a user may only pick one assigned to them */
+    const assetId = formData.get("asset_id")?.toString() || null
+    if (assetId) {
+      if (!UUID_RE.test(assetId)) return jsonError("Asset not found", 400)
+      const { data: asset } = await db.from("assets").select("id, tenant_id").eq("id", assetId).maybeSingle()
+      if (!asset || asset.tenant_id !== tenantId) return jsonError("Asset not found", 400)
+      if (!isStaffRole(me.role)) {
+        const { data: held } = await db
+          .from("asset_assignments")
+          .select("id")
+          .eq("asset_id", assetId)
+          .eq("user_id", requester.id)
+          .is("returned_at", null)
+          .limit(1)
+        if (!held?.length) return jsonError("You can only link an asset assigned to you", 403)
+      }
     }
 
-    /* -----------------------------------
-       5️⃣ Insert ticket
-    ----------------------------------- */
-    const now = new Date()
-    const slaResponseAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString()
+    /* Attachments: checked before anything is written */
+    const files = (formData.getAll("attachments") as File[]).filter((f) => f && f.size > 0)
+    if (files.length > MAX_FILES) return jsonError(`Attach at most ${MAX_FILES} files`, 400)
+    for (const f of files) {
+      if (f.size > MAX_FILE_BYTES) return jsonError(`${f.name} is larger than 10 MB`, 400)
+      if (!ALLOWED_TYPES.has(f.type)) return jsonError(`${f.name}: this file type is not allowed`, 400)
+    }
 
-    const { data: ticket, error: ticketError } = await supabaseAdmin
+    /* Insert ticket */
+    const now = new Date()
+    const { data: ticket, error: ticketError } = await db
       .from("tickets")
       .insert({
-        requester_id: requesterId,
-        requester_name: formData.get("requester_name")?.toString() ?? "",
-        contact: formData.get("contact")?.toString() ?? null,
-        subject: formData.get("subject")?.toString() ?? "",
-        description: formData.get("description")?.toString() ?? null,
-        category: formData.get("category")?.toString() ?? null,
-        sub_category: formData.get("sub_category")?.toString() ?? null,
-        priority: formData.get("priority")?.toString() ?? null,
+        tenant_id: tenantId,
+        requester_id: requester.id,
+        requester_name:
+          text(formData.get("requester_name")?.toString(), 200) ?? requester.full_name ?? requester.email ?? "",
+        contact: text(formData.get("contact")?.toString(), 100),
+        subject,
+        description: text(formData.get("description")?.toString(), 10000),
+        category: text(formData.get("category")?.toString(), 100),
+        sub_category: text(formData.get("sub_category")?.toString(), 100),
+        priority,
         status: "new",
-        location: formData.get("location")?.toString() ?? null,
-        link: formData.get("link")?.toString() ?? null,
-        sla_response_at: slaResponseAt,
+        location: text(formData.get("location")?.toString(), 200),
+        link: text(formData.get("link")?.toString(), 1000),
+        sla_response_at: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
       })
       .select()
       .single()
 
-    if (ticketError || !ticket) {
-      throw ticketError
-    }
+    if (ticketError || !ticket) throw ticketError ?? new Error("Ticket not saved")
 
-    /* Log ticket creation activity */
-    await supabaseAdmin.from("ticket_activity").insert({
+    await db.from("ticket_activity").insert({
+      tenant_id: tenantId,
       ticket_id: ticket.id,
-      actor_id: requesterId,
+      actor_id: me.id,
       action: "created",
-      details: {},
+      details: requester.id !== me.id ? { on_behalf_of: requester.id } : {},
     })
 
-    /* -----------------------------------
-       5.5️⃣ Requester gets a confirmation email with the ticket details;
-       the IT team of the requester's organization gets a web notification.
-       after() runs once the response is sent, so the user is redirected
-       straight away; Vercel keeps the function alive until it finishes.
-    ----------------------------------- */
-    after(() =>
-      notifyTicketEvent(supabaseAdmin, {
-        event: "created",
-        ticket,
-        actorId: user.id,
-      }).catch((err) => console.error("New ticket notifications failed:", err))
-    )
-
-    /* -----------------------------------
-       6️⃣ Link asset (if provided)
-    ----------------------------------- */
-    const assetId = formData.get("asset_id")?.toString()
-
     if (assetId) {
-      const { error: assetLinkError } = await supabaseAdmin
+      const { error } = await db
         .from("asset_tickets")
-        .insert({
-          ticket_id: ticket.id,
-          asset_id: assetId,
-        })
-
-      if (assetLinkError) {
-        throw assetLinkError
-      }
+        .insert({ tenant_id: tenantId, ticket_id: ticket.id, asset_id: assetId })
+      if (error) throw error
     }
 
-    /* -----------------------------------
-       7️⃣ Upload attachments
-    ----------------------------------- */
     for (const file of files) {
-      if (!file || file.size === 0) continue
-
       const buffer = Buffer.from(await file.arrayBuffer())
-      const filePath = `tickets/${ticket.id}/${Date.now()}-${file.name}`
+      const filePath = `tenants/${tenantId}/tickets/${ticket.id}/${randomUUID()}-${safeName(file.name)}`
 
-      const { error: uploadError } = await supabaseAdmin.storage
+      const { error: uploadError } = await db.storage
         .from("ticket-attachments")
-        .upload(filePath, buffer, {
-          contentType: file.type,
-          upsert: false,
-        })
-
+        .upload(filePath, buffer, { contentType: file.type, upsert: false })
       if (uploadError) throw uploadError
 
-      const { error: attachmentError } = await supabaseAdmin
-        .from("ticket_attachments")
-        .insert({
-          ticket_id: ticket.id,
-          file_name: file.name,
-          file_path: filePath,
-          file_type: file.type,
-          file_size: file.size,
-        })
-
+      const { error: attachmentError } = await db.from("ticket_attachments").insert({
+        tenant_id: tenantId,
+        ticket_id: ticket.id,
+        file_name: file.name.slice(0, 255),
+        file_path: filePath,
+        file_type: file.type,
+        file_size: file.size,
+      })
       if (attachmentError) throw attachmentError
     }
 
-    /* -----------------------------------
-       8️⃣ Success
-    ----------------------------------- */
-    return NextResponse.json({
-      success: true,
-      ticketId: ticket.id,
-    })
+    /* Requester gets a confirmation email; the tenant's IT team a web notification */
+    after(() =>
+      notifyTicketEvent(db, { event: "created", ticket, actorId: me.id }).catch((err) =>
+        console.error("New ticket notifications failed:", err)
+      )
+    )
+
+    return NextResponse.json({ success: true, ticketId: ticket.id })
   } catch (err) {
     console.error("Ticket create failed:", err)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

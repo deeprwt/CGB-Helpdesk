@@ -2,8 +2,8 @@
  * Who may do what on a ticket. Shared by the ticket page (to show buttons)
  * and the ticket API routes (to enforce the same rules on the server).
  *
- * - The IT team (engineers, admins, super admins) can VIEW every ticket of the
- *   organisations they look after, whoever it is assigned to.
+ * - The IT team (engineers, admins) can VIEW every ticket of their own tenant,
+ *   whoever it is assigned to. A super admin can view every tenant's tickets.
  * - Only the ASSIGNED engineer works a ticket: close, hold, reopen, reply.
  * - An unassigned ticket must be acquired first.
  * - The assigned engineer, or an admin, can transfer (escalate) it to someone else.
@@ -24,6 +24,8 @@ export type TicketPermissionInput = {
   requester_id: string
   assignee: string | null
   status: string | null
+  /** When known: staff of another tenant get no rights on the ticket */
+  tenant_id?: string | null
 }
 
 export type TicketPermissions = {
@@ -44,11 +46,13 @@ export type TicketPermissions = {
 }
 
 export function ticketPermissions(
-  me: { id: string; role: string | null | undefined },
+  me: { id: string; role: string | null | undefined; tenant_id?: string | null },
   ticket: TicketPermissionInput
 ): TicketPermissions {
-  const staff = isStaffRole(me.role)
-  const admin = isAdminRole(me.role)
+  const otherTenant =
+    me.role !== "superadmin" && !!me.tenant_id && !!ticket.tenant_id && me.tenant_id !== ticket.tenant_id
+  const staff = isStaffRole(me.role) && !otherTenant
+  const admin = isAdminRole(me.role) && !otherTenant
   const isRequester = ticket.requester_id === me.id
   const isAssignee = staff && !!ticket.assignee && ticket.assignee === me.id
   const status = ticket.status ?? "new"

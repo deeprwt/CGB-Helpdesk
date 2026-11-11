@@ -1,5 +1,5 @@
 import { NextResponse, after } from "next/server"
-import { getRequestUser, jsonError, loadPerson, serviceClient } from "@/lib/ticket-server"
+import { jsonError, requireActor, staffCoversTicket } from "@/lib/ticket-server"
 import { ticketPermissions } from "@/lib/ticket-access"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
 
@@ -16,8 +16,9 @@ const HOLD_HOURS = [24, 48, 72]
  */
 export async function POST(req: Request) {
   try {
-    const authUser = await getRequestUser(req)
-    if (!authUser) return jsonError("Unauthorized", 401)
+    const ctx = await requireActor(req, { roles: ["engineer", "admin", "superadmin"] })
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
     const body = await req.json().catch(() => ({}))
     const ticketId: string | undefined = body.ticket_id
@@ -28,12 +29,8 @@ export async function POST(req: Request) {
       return jsonError("Send ticket_id and a status of closed or hold", 400)
     }
 
-    const db = serviceClient()
-    const me = await loadPerson(db, authUser.id)
-    if (!me) return jsonError("Unauthorized", 401)
-
     const { data: ticket } = await db.from("tickets").select("*").eq("id", ticketId).maybeSingle()
-    if (!ticket) return jsonError("Ticket not found", 404)
+    if (!ticket || !staffCoversTicket(me, ticket)) return jsonError("Ticket not found", 404)
 
     const can = ticketPermissions(me, ticket)
     if (!can.canCloseOrHold) {
@@ -70,6 +67,7 @@ export async function POST(req: Request) {
       if (!updated || updated.length === 0) return changedMeanwhile()
 
       await db.from("ticket_activity").insert({
+        tenant_id: ticket.tenant_id,
         ticket_id: ticketId,
         actor_id: me.id,
         action: "closed",
@@ -93,6 +91,7 @@ export async function POST(req: Request) {
       if (!updated || updated.length === 0) return changedMeanwhile()
 
       await db.from("ticket_activity").insert({
+        tenant_id: ticket.tenant_id,
         ticket_id: ticketId,
         actor_id: me.id,
         action: "hold",

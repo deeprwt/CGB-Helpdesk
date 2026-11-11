@@ -1,12 +1,6 @@
 import { NextResponse, after } from "next/server"
-import {
-  getRequestUser,
-  jsonError,
-  loadPerson,
-  serviceClient,
-  staffCoversRequester,
-} from "@/lib/ticket-server"
-import { isAdminRole, isStaffRole, ticketPermissions } from "@/lib/ticket-access"
+import { jsonError, loadPerson, requireActor, staffCoversTicket } from "@/lib/ticket-server"
+import { isStaffRole, ticketPermissions } from "@/lib/ticket-access"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
 import { loadTicketStaffPicker } from "@/lib/org"
 
@@ -19,8 +13,9 @@ export const runtime = "nodejs"
  */
 export async function POST(req: Request) {
   try {
-    const authUser = await getRequestUser(req)
-    if (!authUser) return jsonError("Unauthorized", 401)
+    const ctx = await requireActor(req, { roles: ["engineer", "admin", "superadmin"] })
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
     const body = await req.json().catch(() => ({}))
     const { ticket_id, new_engineer_id } = body
@@ -29,13 +24,9 @@ export async function POST(req: Request) {
 
     if (!ticket_id || !new_engineer_id) return jsonError("Missing fields", 400)
 
-    const db = serviceClient()
-    const me = await loadPerson(db, authUser.id)
-    if (!me) return jsonError("Unauthorized", 401)
-
     /* 1. Get current ticket and check who may transfer it */
     const { data: ticket } = await db.from("tickets").select("*").eq("id", ticket_id).maybeSingle()
-    if (!ticket) return jsonError("Ticket not found", 404)
+    if (!ticket || !staffCoversTicket(me, ticket)) return jsonError("Ticket not found", 404)
 
     const can = ticketPermissions(me, ticket)
     if (!can.canTransfer) {
@@ -47,18 +38,6 @@ export async function POST(req: Request) {
       )
     }
 
-    const { data: requester } = await db
-      .from("users")
-      .select("email")
-      .eq("id", ticket.requester_id)
-      .maybeSingle()
-
-    if (isAdminRole(me.role) && ticket.assignee !== me.id) {
-      if (!(await staffCoversRequester(db, me, requester?.email))) {
-        return jsonError("This ticket belongs to an organisation you don't look after", 403)
-      }
-    }
-
     if (new_engineer_id === ticket.assignee) {
       return jsonError("The ticket is already assigned to this engineer", 400)
     }
@@ -67,9 +46,9 @@ export async function POST(req: Request) {
     if (!newEngineer || !isStaffRole(newEngineer.role)) {
       return jsonError("Tickets can only be transferred to an engineer or admin", 400)
     }
-    // The new engineer must look after the requester's organisation (no cross-tenant hand-offs)
-    if (!(await staffCoversRequester(db, newEngineer, requester?.email))) {
-      return jsonError("That engineer doesn't look after this ticket's organisation", 400)
+    // The new engineer must belong to the ticket's tenant (no cross-tenant hand-offs)
+    if (newEngineer.tenant_id !== ticket.tenant_id) {
+      return jsonError("That engineer is not part of this ticket's organisation", 400)
     }
 
     const previousAssignee: string = ticket.assignee
@@ -105,6 +84,7 @@ export async function POST(req: Request) {
 
     /* 4. Insert new assignment record */
     await db.from("ticket_assignments").insert({
+      tenant_id: ticket.tenant_id,
       ticket_id,
       engineer_id: new_engineer_id,
       action: "reassigned",
@@ -113,6 +93,7 @@ export async function POST(req: Request) {
     /* 5. Log activity */
     const prevEngineer = previousAssignee ? await loadPerson(db, previousAssignee) : null
     await db.from("ticket_activity").insert({
+      tenant_id: ticket.tenant_id,
       ticket_id,
       actor_id: me.id,
       action: "reassigned",
@@ -151,36 +132,27 @@ export async function POST(req: Request) {
  */
 export async function GET(req: Request) {
   try {
-    const authUser = await getRequestUser(req)
-    if (!authUser) return jsonError("Unauthorized", 401)
+    const ctx = await requireActor(req, { roles: ["engineer", "admin", "superadmin"] })
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
     const ticketId = new URL(req.url).searchParams.get("ticket_id")
     if (!ticketId) return jsonError("Missing ticket_id", 400)
 
-    const db = serviceClient()
-    const me = await loadPerson(db, authUser.id)
-    if (!me) return jsonError("Unauthorized", 401)
-
     const { data: ticket } = await db
       .from("tickets")
-      .select("id, requester_id, assignee, status")
+      .select("id, tenant_id, requester_id, assignee, status")
       .eq("id", ticketId)
       .maybeSingle()
-    if (!ticket) return jsonError("Ticket not found", 404)
-
-    const { data: requester } = await db
-      .from("users")
-      .select("email")
-      .eq("id", ticket.requester_id)
-      .maybeSingle()
+    if (!ticket || !staffCoversTicket(me, ticket)) return jsonError("Ticket not found", 404)
 
     const can = ticketPermissions(me, ticket)
-    if (!can.canTransfer || (!can.isAssignee && !(await staffCoversRequester(db, me, requester?.email)))) {
+    if (!can.canTransfer) {
       return jsonError("Only the assigned engineer or an admin can transfer this ticket", 403)
     }
 
     const pick = await loadTicketStaffPicker(db, ["engineer", "admin"])
-    const engineers = pick(requester?.email)
+    const engineers = pick(ticket.tenant_id)
       .filter((s) => s.id !== ticket.assignee)
       .map((s) => ({ id: s.id, name: s.name?.trim() || s.email || "Engineer", email: s.email ?? "" }))
       .sort((a, b) => a.name.localeCompare(b.name))

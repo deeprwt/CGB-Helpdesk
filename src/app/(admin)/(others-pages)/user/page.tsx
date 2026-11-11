@@ -16,7 +16,7 @@ export default function Profile() {
       <div className="flex flex-col gap-6">
         <PageHeader
           title="Users & Roles"
-          description="Everyone in your organisation, the role they hold, and quick access to their profiles."
+          description="Everyone in your organisation, the role they hold and their company. Admins invite new members here."
           breadcrumbs={[{ label: "Dashboard", href: "/" }, { label: "Users & Roles" }]}
         />
         <DataTableDemo />

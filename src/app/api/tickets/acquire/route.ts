@@ -1,12 +1,5 @@
 import { NextResponse, after } from "next/server"
-import {
-  getRequestUser,
-  jsonError,
-  loadPerson,
-  serviceClient,
-  staffCoversRequester,
-} from "@/lib/ticket-server"
-import { isStaffRole } from "@/lib/ticket-access"
+import { jsonError, requireActor, staffCoversTicket } from "@/lib/ticket-server"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
 
 export const runtime = "nodejs"
@@ -18,28 +11,17 @@ export const runtime = "nodejs"
  */
 export async function POST(req: Request) {
   try {
-    const authUser = await getRequestUser(req)
-    if (!authUser) return jsonError("Unauthorized", 401)
+    const ctx = await requireActor(req, { roles: ["engineer", "admin", "superadmin"] })
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
     const { ticket_id } = await req.json().catch(() => ({}))
     if (!ticket_id) return jsonError("Missing ticket_id", 400)
 
-    const db = serviceClient()
-    const me = await loadPerson(db, authUser.id)
-    if (!me || !isStaffRole(me.role)) return jsonError("Only the IT team can acquire tickets", 403)
-
     const { data: ticket } = await db.from("tickets").select("*").eq("id", ticket_id).maybeSingle()
     if (!ticket) return jsonError("Ticket not found", 404)
 
-    const { data: requester } = await db
-      .from("users")
-      .select("email")
-      .eq("id", ticket.requester_id)
-      .maybeSingle()
-
-    if (!(await staffCoversRequester(db, me, requester?.email))) {
-      return jsonError("This ticket belongs to an organisation you don't look after", 403)
-    }
+    if (!staffCoversTicket(me, ticket)) return jsonError("Ticket not found", 404)
 
     if (ticket.status === "closed") return jsonError("This ticket is closed", 409)
     if (ticket.assignee) return jsonError("Ticket already acquired", 409)
@@ -65,11 +47,13 @@ export async function POST(req: Request) {
 
     await Promise.all([
       db.from("ticket_assignments").insert({
+        tenant_id: ticket.tenant_id,
         ticket_id,
         engineer_id: me.id,
         action: "acquired",
       }),
       db.from("ticket_activity").insert({
+        tenant_id: ticket.tenant_id,
         ticket_id,
         actor_id: me.id,
         action: "acquired",

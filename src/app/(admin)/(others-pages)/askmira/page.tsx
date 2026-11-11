@@ -16,7 +16,9 @@ import { StatusBadge } from "@/components/common/status-badge"
 type Company = {
   id: string
   name: string
-  domain: string
+  domain: string | null
+  /** The tenant the company is in: only given to a super admin. */
+  tenant_name?: string | null
   connected: boolean
   askmira_workspace: string | null
   askmira_origin: string | null
@@ -104,7 +106,7 @@ export default function AskMiraPage() {
           <Skeleton className="h-40 w-full rounded-2xl" />
         ) : companies.length === 0 ? (
           <Card>
-            <EmptyState icon={Building2} title="No companies" description="You don't look after any company here." />
+            <EmptyState icon={Building2} title="No companies" description="Your organisation has no active companies here yet." />
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
@@ -114,7 +116,11 @@ export default function AskMiraPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <CardTitle className="truncate">{company.name}</CardTitle>
-                      <CardDescription>@{company.domain}</CardDescription>
+                      {company.tenant_name || company.domain ? (
+                        <CardDescription>
+                          {[company.tenant_name, company.domain].filter(Boolean).join(" · ")}
+                        </CardDescription>
+                      ) : null}
                     </div>
                     <StatusBadge tone={company.connected ? "green" : "gray"} dot>
                       {company.connected ? "Connected" : "Not connected"}

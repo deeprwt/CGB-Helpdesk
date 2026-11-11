@@ -2,13 +2,9 @@
 
 import * as React from "react"
 import { supabase } from "@/lib/supabaseClient"
-import {
-  getUserAccessibleDomains,
-  getUserAccessibleOrganizations,
-  buildEmailDomainFilter,
-  extractOrgDomain,
-  type Organization,
-} from "@/lib/org"
+import { fetchAllRows } from "@/lib/fetch-all-rows"
+import { type Organization } from "@/lib/org"
+import { apiFetch, ApiError } from "@/lib/api-client"
 import { useRouter } from "next/navigation"
 
 import { cn } from "@/lib/utils"
@@ -57,7 +53,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
-import { findAssetByCode } from "@/lib/asset-codes"
+import { DUPLICATE_CODE, findAssetByCode } from "@/lib/asset-codes"
 
 /* ---------------- UI HELPERS ---------------- */
 
@@ -130,6 +126,10 @@ export type User = {
   email: string
 }
 
+type Person = User & { tenant_id: string | null }
+
+type Tenant = { id: string; name: string; status: string | null }
+
 export type AssetFormState = {
   organization_id: string
   asset_code: string
@@ -155,6 +155,8 @@ type Props = {
   assetId?: string
   initialData?: AssetFormState
   initialAssignedUser?: User | null
+  /** Edit mode: the asset's tenant. An asset can't be moved to another tenant. */
+  initialTenantId?: string | null
 }
 
 export default function AssetForm({
@@ -162,6 +164,7 @@ export default function AssetForm({
   assetId,
   initialData,
   initialAssignedUser = null,
+  initialTenantId = null,
 }: Props) {
   const router = useRouter()
 
@@ -194,53 +197,81 @@ export default function AssetForm({
     }
   )
 
-  /* ---------------- USERS + ORGANIZATIONS ---------------- */
-  const [users, setUsers] = React.useState<User[]>([])
+  /* ---------------- PEOPLE + COMPANIES (+ TENANTS FOR SUPER ADMIN) ---------------- */
+  // RLS scopes every read: the IT team sees its own tenant, a super admin sees all.
+  const [people, setPeople] = React.useState<Person[]>([])
   const [orgs, setOrgs] = React.useState<Organization[]>([])
+  const [tenants, setTenants] = React.useState<Tenant[]>([])
+  const [isSuperAdmin, setIsSuperAdmin] = React.useState(false)
+  const [tenantId, setTenantId] = React.useState<string | null>(initialTenantId)
   const [openAssign, setOpenAssign] = React.useState(false)
   const [selectedUser, setSelectedUser] =
     React.useState<User | null>(initialAssignedUser)
 
   React.useEffect(() => {
-    const loadUsers = async () => {
+    const loadOptions = async () => {
       const {
         data: { user: currentUser },
       } = await supabase.auth.getUser()
 
       if (!currentUser) return
-      const { data: profile } = await supabase.from("users").select("role").eq("id", currentUser.id).single()
-      const role = profile?.role ?? "user"
-      const [domains, accessibleOrgs] = await Promise.all([
-        getUserAccessibleDomains(supabase, currentUser.id, currentUser.email ?? "", role),
-        getUserAccessibleOrganizations(supabase, currentUser.id, currentUser.email ?? "", role),
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role, tenant_id")
+        .eq("id", currentUser.id)
+        .single()
+      const superAdmin = profile?.role === "superadmin"
+
+      const [{ data: peopleRows }, { data: orgRows }, tenantRes] = await Promise.all([
+        fetchAllRows<Person>((from, to) =>
+          supabase
+            .from("users")
+            .select("id, email, tenant_id")
+            .order("email")
+            .order("id")
+            .range(from, to)
+        ),
+        supabase
+          .from("organizations")
+          .select("id, name, domain, status, tenant_id")
+          .order("name"),
+        superAdmin
+          ? supabase.from("tenants").select("id, name, status").order("name")
+          : Promise.resolve({ data: [] as Tenant[] }),
       ])
 
-      const { data } = await supabase
-        .from("users")
-        .select("id, email")
-        .or(buildEmailDomainFilter(domains))
-        .order("email")
-
-      setUsers(data ?? [])
-      setOrgs(accessibleOrgs)
+      setIsSuperAdmin(superAdmin)
+      setPeople(peopleRows.filter((p) => p.email))
+      setOrgs((orgRows ?? []) as Organization[])
+      setTenants((tenantRes.data ?? []) as Tenant[])
+      // New assets go into the creator's own tenant unless a super admin picks another
+      setTenantId((t) => t ?? profile?.tenant_id ?? null)
     }
 
-    loadUsers()
+    loadOptions()
   }, [])
 
-  const selectedOrg = orgs.find((o) => o.id === form.organization_id) ?? null
+  // Non-super-admins only ever receive their own tenant's rows (RLS);
+  // a super admin narrows companies and people to the chosen tenant.
+  const tenantCompanies = isSuperAdmin
+    ? orgs.filter((o) => o.tenant_id === tenantId)
+    : orgs
+  const tenantPeople = isSuperAdmin
+    ? people.filter((p) => p.tenant_id === tenantId)
+    : people
+  const selectedTenant = tenants.find((t) => t.id === tenantId) ?? null
 
-  // Assignable users are limited to the selected organization's domain
-  const orgUsers = selectedOrg
-    ? users.filter((u) => extractOrgDomain(u.email) === selectedOrg.domain)
-    : users
+  const handleTenantChange = (next: string) => {
+    if (next === tenantId) return
+    setTenantId(next)
+    // Companies and people belong to one tenant: drop picks from the old one
+    setForm((f) => ({ ...f, organization_id: "" }))
+    setSelectedUser(null)
+    setCodeError(null)
+  }
 
   const handleOrgChange = (orgId: string) => {
     setForm((f) => ({ ...f, organization_id: orgId }))
-    const org = orgs.find((o) => o.id === orgId)
-    if (selectedUser && org && extractOrgDomain(selectedUser.email) !== org.domain) {
-      setSelectedUser(null)
-    }
   }
 
   const handleUserSelect = (u: User) => {
@@ -248,23 +279,10 @@ export default function AssetForm({
     setOpenAssign(false)
   }
 
-  /* ---------------- SAVE ASSIGNMENT ---------------- */
-  const saveAssignment = async (
-    finalAssetId: string,
-    assignedBy: string | null
-  ) => {
-    if (!selectedUser) return
-
-    await supabase
-      .from("asset_assignments")
-      .delete()
-      .eq("asset_id", finalAssetId)
-
-    await supabase.from("asset_assignments").insert({
-      asset_id: finalAssetId,
-      user_id: selectedUser.id,
-      assigned_by: assignedBy,
-    })
+  const showCodeError = (msg: string) => {
+    setCodeError(msg)
+    toast.error(msg)
+    document.getElementById("asset-asset_code")?.scrollIntoView({ behavior: "smooth", block: "center" })
   }
 
   /* ---------------- SUBMIT ---------------- */
@@ -278,16 +296,18 @@ export default function AssetForm({
 
     setLoading(true)
 
-    // Asset codes must be unique (case-insensitive); on edit, ignore this asset itself
+    // Asset codes are unique per tenant (case-insensitive); on edit, ignore this asset itself.
+    // This is a friendly pre-check: the API enforces it and answers 409 "duplicate_code".
     const code = form.asset_code.trim()
     if (code) {
       try {
-        const clash = await findAssetByCode(code, mode === "edit" ? assetId : undefined)
+        const clash = await findAssetByCode(
+          code,
+          mode === "edit" ? assetId : undefined,
+          isSuperAdmin ? tenantId : undefined
+        )
         if (clash) {
-          const msg = `Asset code ${clash.asset_code} is already used by another asset`
-          setCodeError(msg)
-          toast.error(msg)
-          document.getElementById("asset-asset_code")?.scrollIntoView({ behavior: "smooth", block: "center" })
+          showCodeError(`Asset code ${clash.asset_code} is already used by another asset`)
           setLoading(false)
           return
         }
@@ -297,85 +317,48 @@ export default function AssetForm({
       }
     }
 
-    let assetIdFinal = assetId
-
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser()
-
-    if (mode === "create") {
-      const { data: asset, error } = await supabase
-        .from("assets")
-        .insert({
-          ...(form.organization_id ? { organization_id: form.organization_id } : {}),
-          asset_code: form.asset_code,
-          asset_type: form.asset_type,
-          model: form.model,
-          status: form.status,
-          location: form.location,
-          department: form.department,
-          purchase_date: form.purchase_date || null,
-          warranty_expiry: form.warranty_expiry || null,
-        })
-        .select()
-        .single()
-
-      if (error || !asset) {
-        toast.error(`Failed to create asset${error ? `: ${error.message}` : ""}`)
-        setLoading(false)
-        return
-      }
-
-      assetIdFinal = asset.id
-    } else {
-      const { error } = await supabase
-        .from("assets")
-        .update({
-          ...(form.organization_id ? { organization_id: form.organization_id } : {}),
-          asset_code: form.asset_code,
-          asset_type: form.asset_type,
-          model: form.model,
-          status: form.status,
-          location: form.location,
-          department: form.department,
-          purchase_date: form.purchase_date || null,
-          warranty_expiry: form.warranty_expiry || null,
-        })
-        .eq("id", assetId)
-
-      if (error) {
-        toast.error(`Failed to update asset: ${error.message}`)
-        setLoading(false)
-        return
-      }
-
-      await supabase
-        .from("asset_details")
-        .delete()
-        .eq("asset_id", assetId)
+    const body = {
+      asset: {
+        ...(form.organization_id ? { organization_id: form.organization_id } : {}),
+        asset_code: form.asset_code,
+        asset_type: form.asset_type,
+        model: form.model,
+        status: form.status,
+        location: form.location,
+        department: form.department,
+        purchase_date: form.purchase_date,
+        warranty_expiry: form.warranty_expiry,
+      },
+      // The server drops empty values; on edit it replaces all detail values
+      details: {
+        serial_no: form.serial_no,
+        cpu: form.cpu,
+        ram: form.ram,
+        storage: form.storage,
+        os_name: form.os_name,
+        mac_address: form.mac_address,
+        vendor: form.vendor,
+      },
+      assigned_user_id: selectedUser.id,
+      ...(mode === "create" && isSuperAdmin && tenantId ? { tenant_id: tenantId } : {}),
     }
 
-    const detailRows = Object.entries({
-      serial_no: form.serial_no,
-      cpu: form.cpu,
-      ram: form.ram,
-      storage: form.storage,
-      os_name: form.os_name,
-      mac_address: form.mac_address,
-      vendor: form.vendor,
-    })
-      .filter(([, v]) => v)
-      .map(([key, value]) => ({
-        asset_id: assetIdFinal!,
-        key,
-        value,
-      }))
-
-    if (detailRows.length > 0) {
-      await supabase.from("asset_details").insert(detailRows)
+    try {
+      if (mode === "create") {
+        await apiFetch<{ id: string }>("/api/assets", { method: "POST", body })
+      } else {
+        await apiFetch<{ id: string }>(`/api/assets/${assetId}`, { method: "PATCH", body })
+      }
+    } catch (err) {
+      setLoading(false)
+      if (err instanceof ApiError && err.code === DUPLICATE_CODE) {
+        showCodeError(err.message)
+        return
+      }
+      const message = err instanceof Error ? err.message : "Unexpected error"
+      toast.error(`Failed to ${mode === "create" ? "create" : "update"} asset: ${message}`)
+      return
     }
-
-    await saveAssignment(assetIdFinal!, currentUser?.id ?? null)
 
     toast.success(
       mode === "create" ? "Asset created" : "Asset updated"
@@ -401,9 +384,37 @@ export default function AssetForm({
                   description="Identity, ownership and where the asset lives."
                 />
                 <FieldGroup className="sm:grid-cols-2">
+                  {isSuperAdmin && (
+                    <Field className="sm:col-span-2">
+                      <FieldLabel htmlFor="asset-tenant">Organisation</FieldLabel>
+                      <Select
+                        value={tenantId ?? undefined}
+                        onValueChange={handleTenantChange}
+                        disabled={mode === "edit"}
+                      >
+                        <SelectTrigger id="asset-tenant" className="w-full">
+                          <SelectValue placeholder="Select organisation" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {tenants.map((t) => (
+                            <SelectItem key={t.id} value={t.id}>
+                              {t.name}
+                              {t.status && t.status !== "active" ? ` (${t.status})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>
+                        {mode === "edit"
+                          ? "An asset stays in the organisation it was created in."
+                          : "The tenant this asset belongs to. Companies and people below follow it."}
+                      </FieldDescription>
+                    </Field>
+                  )}
+
                   <Field className="sm:col-span-2">
                     <FieldLabel htmlFor="asset-organization">
-                      Organization
+                      Company
                       <span className="font-normal text-gray-400 dark:text-gray-500">
                         (optional)
                       </span>
@@ -413,12 +424,13 @@ export default function AssetForm({
                       onValueChange={handleOrgChange}
                     >
                       <SelectTrigger id="asset-organization" className="w-full">
-                        <SelectValue placeholder="Select organization" />
+                        <SelectValue placeholder="Select company" />
                       </SelectTrigger>
                       <SelectContent>
-                        {orgs.map((o) => (
+                        {tenantCompanies.map((o) => (
                           <SelectItem key={o.id} value={o.id}>
-                            {o.name} ({o.domain})
+                            {o.name}
+                            {o.domain ? ` (${o.domain})` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -559,7 +571,7 @@ export default function AssetForm({
                         <CommandList>
                           <CommandEmpty>No user found</CommandEmpty>
                           <CommandGroup>
-                            {orgUsers.map((u) => (
+                            {tenantPeople.map((u) => (
                               <CommandItem
                                 key={u.id}
                                 value={u.email}
@@ -582,9 +594,9 @@ export default function AssetForm({
                     </PopoverContent>
                   </Popover>
                   <FieldDescription>
-                    {selectedOrg
-                      ? `Showing users from ${selectedOrg.name} (${orgUsers.length})`
-                      : "Select an organization in Asset basics to narrow this list"}
+                    {isSuperAdmin && selectedTenant
+                      ? `Showing people in ${selectedTenant.name} (${tenantPeople.length})`
+                      : `Showing people in your organisation (${tenantPeople.length})`}
                   </FieldDescription>
                   <FieldError>{!selectedUser ? assignError : null}</FieldError>
                 </Field>

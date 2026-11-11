@@ -9,7 +9,8 @@
 // Each does what the helpdesk's own screens do — the same rows, the same
 // activity entry, the same in-app notifications and emails — so a ticket
 // raised from AskMiraa is worked here like any other. Who is notified is
-// decided in lib/ticket-notify.ts, as for the helpdesk.
+// decided in lib/ticket-notify.ts, as for the helpdesk. Every row written
+// carries the connected company's tenant.
 
 import { sendTicketEmail } from "@/lib/email"
 import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
@@ -70,10 +71,12 @@ async function createTicket(ctx: Ctx) {
     if (!held?.length) throw httpError(422, "That asset is not assigned to you.")
   }
 
+  const tenantId = org.tenant_id
   const requesterName = me.full_name || me.email
   const { data: ticket, error } = await db()
     .from("tickets")
     .insert({
+      tenant_id: tenantId,
       requester_id: me.id,
       requester_name: requesterName,
       contact,
@@ -92,23 +95,25 @@ async function createTicket(ctx: Ctx) {
   if (error || !ticket) throw error ?? new Error("The ticket was not created.")
 
   await db().from("ticket_activity").insert({
+    tenant_id: tenantId,
     ticket_id: ticket.id,
     actor_id: me.id,
     action: "created",
     details: { source: "askmira" },
   })
   if (assetId) {
-    await db().from("asset_tickets").insert({ ticket_id: ticket.id, asset_id: assetId })
+    await db().from("asset_tickets").insert({ tenant_id: tenantId, ticket_id: ticket.id, asset_id: assetId })
   }
 
   const ref = shortRef(ticket.id)
   // Same as the helpdesk's New Ticket form: confirmation email (with the
-  // details) to the requester, web notification to the company's IT team.
+  // details) to the requester, web notification to the tenant's IT team.
   defer(() =>
     notifyTicketEvent(db(), {
       event: "created",
       ticket: {
         id: ticket.id,
+        tenant_id: tenantId,
         subject,
         requester_id: me.id,
         requester_name: requesterName,
@@ -123,7 +128,7 @@ async function createTicket(ctx: Ctx) {
     })
   )
 
-  console.log(`[AskMiraa] ticket #${ref} raised for ${org.domain} by ${me.email}`)
+  console.log(`[AskMiraa] ticket #${ref} raised for ${org.name} (${org.id}) by ${me.email}`)
   return { ticket: { id: ticket.id, ref, subject, status: ticket.status, created_at: ticket.created_at } }
 }
 
@@ -147,6 +152,7 @@ async function reply(ctx: Ctx) {
   const { data: message, error } = await db()
     .from("ticket_messages")
     .insert({
+      tenant_id: ticket.tenant_id,
       ticket_id: ticket.id,
       sender_id: me.id,
       sender_role: support ? "engineer" : "user",
@@ -161,6 +167,7 @@ async function reply(ctx: Ctx) {
   if (recipient && recipient !== me.id) {
     defer(async () => {
       await db().from("notifications").insert({
+        tenant_id: ticket.tenant_id,
         user_id: recipient,
         actor_id: me.id,
         ticket_id: ticket.id,

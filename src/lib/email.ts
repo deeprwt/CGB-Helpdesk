@@ -515,7 +515,7 @@ function buildVerificationEmailHtml(params: VerificationEmailParams): string {
                 Verify Your Email Address
               </h1>
               <p style="margin:0 0 8px;font-size:15px;color:#4b5563;line-height:1.6;text-align:center;">
-                Hi <strong>${params.recipientName}</strong>,
+                Hi <strong>${esc(params.recipientName)}</strong>,
               </p>
               <p style="margin:0 0 32px;font-size:15px;color:#4b5563;line-height:1.6;text-align:center;">
                 Thank you for signing up! Please verify your email address by clicking the button below.
@@ -590,5 +590,112 @@ export async function sendVerificationEmail(params: VerificationEmailParams): Pr
     to: params.to,
     subject: "Verify Your Email — CGB Solutions Helpdesk",
     html: buildVerificationEmailHtml(params),
+  })
+}
+
+/* ──────────────────────────────────────
+   Invitation Email (admin added you to a tenant)
+   ────────────────────────────────────── */
+type InviteEmailParams = {
+  to: string
+  recipientName: string
+  tenantName: string
+  inviterName: string
+  role: string
+  /** One-time link that signs the person in and opens "set your password" */
+  actionUrl: string
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  user: "User",
+  engineer: "Engineer",
+  admin: "Admin",
+  superadmin: "Super Admin",
+}
+
+function buildInviteEmailHtml(params: InviteEmailParams): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+  const logoUrl = `${appUrl}/images/logo/logo-icon.svg`
+  const year = new Date().getFullYear()
+  const url = esc(params.actionUrl)
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>You're invited</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background-color:#1a1a2e;padding:28px 40px;text-align:center;">
+              <img src="${logoUrl}" alt="" height="40" style="height:40px;margin-bottom:8px;" />
+              <p style="margin:0;color:#ffffff;font-size:14px;font-weight:600;letter-spacing:1px;">${esc(params.tenantName)} · IT Service Desk</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:40px;">
+              <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#111827;line-height:1.3;text-align:center;">
+                You've been invited
+              </h1>
+              <p style="margin:0 0 8px;font-size:15px;color:#4b5563;line-height:1.6;text-align:center;">
+                Hi${params.recipientName ? ` <strong>${esc(params.recipientName)}</strong>` : ""},
+              </p>
+              <p style="margin:0 0 32px;font-size:15px;color:#4b5563;line-height:1.6;text-align:center;">
+                ${esc(params.inviterName)} added you to <strong>${esc(params.tenantName)}</strong>'s IT service desk
+                as <strong>${esc(ROLE_LABEL[params.role] ?? params.role)}</strong>. Set your password to get started.
+              </p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${url}" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;padding:14px 48px;border-radius:8px;text-decoration:none;letter-spacing:0.5px;">
+                      Set your password
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 16px;font-size:13px;color:#92400e;line-height:1.5;text-align:center;">
+                This link works once and expires soon. If it has expired, ask your administrator to resend the invitation.
+              </p>
+              <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;line-height:1.6;">
+                If the button doesn't work, copy and paste this link into your browser:<br />
+                <a href="${url}" style="color:#2563eb;word-break:break-all;">${url}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 40px 32px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#9ca3af;">
+                If you weren't expecting this, you can ignore this email. &copy; ${year}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+}
+
+/**
+ * Sends the invitation. Throws when SMTP is not configured, because without
+ * the email the person cannot get in — the caller should report that.
+ */
+export async function sendInviteEmail(params: InviteEmailParams): Promise<void> {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    throw new Error("Email (SMTP) is not configured on this server, so the invitation could not be sent")
+  }
+
+  await transporter.sendMail({
+    from: `"${params.tenantName.replace(/["\r\n]/g, "")} Service Desk" <${process.env.SMTP_FROM ?? process.env.SMTP_USER}>`,
+    to: params.to,
+    subject: `You're invited to ${params.tenantName}'s IT service desk`,
+    html: buildInviteEmailHtml(params),
   })
 }

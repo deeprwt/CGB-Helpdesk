@@ -46,7 +46,6 @@ import TicketActivityTrail, {
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
 import RequesterTicketHistory from "@/components/tickets/ticket-details/RequesterTicketHistory";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
-import { extractOrgDomain, getStaffWorkDomains } from "@/lib/org";
 import { isStaffRole, ticketPermissions } from "@/lib/ticket-access";
 import { toast } from "sonner";
 
@@ -70,6 +69,7 @@ type Ticket = {
   priority: "low" | "medium" | "high";
   requester_id: string;
   requester_name: string;
+  tenant_id: string | null;
   assignee: string | null;
   assigned_at: string | null;
   created_at: string;
@@ -196,37 +196,6 @@ const ACTIVITY_ACTION_STATUS: Record<string, ActivityStatus> = {
   sla_resolution_breach: "hold",
 };
 
-/* -----------------------------------
-   Access control (who may OPEN the page).
-   What they may DO is decided by ticketPermissions().
------------------------------------ */
-async function checkTicketAccess(
-  role: Role,
-  userId: string,
-  email: string,
-  ticket: Ticket
-): Promise<boolean> {
-  if (role === "superadmin") return true;
-  // Everyone can open the tickets they raised, whatever their role
-  if (ticket.requester_id === userId) return true;
-  if (role === "user") return false;
-
-  if (role === "engineer" || role === "admin") {
-    if (ticket.assignee === userId) return true;
-    // The IT team can VIEW any ticket of the organisations they look after,
-    // including ones assigned to another engineer (read only). Compare the
-    // requester's domain directly — same rule as the API routes.
-    const [domains, { data: requester }] = await Promise.all([
-      getStaffWorkDomains(supabase, userId, email, role),
-      supabase.from("users").select("email").eq("id", ticket.requester_id).maybeSingle(),
-    ]);
-    const requesterDomain = extractOrgDomain(requester?.email ?? "");
-    return !!requesterDomain && domains.includes(requesterDomain);
-  }
-
-  return false;
-}
-
 async function postJson(url: string, body: Record<string, unknown>) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return { ok: false, error: "Your session has expired. Sign in again." };
@@ -259,6 +228,7 @@ export default function TicketDetailsPage() {
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [userId, setUserId] = React.useState<string | null>(null);
   const [role, setRole] = React.useState<Role | null>(null);
+  const [myTenantId, setMyTenantId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const [closeOpen, setCloseOpen] = React.useState(false);
@@ -294,7 +264,7 @@ export default function TicketDetailsPage() {
       { data: assignmentData },
       { data: activityData },
     ] = await Promise.all([
-      supabase.from("tickets").select("*").eq("id", id).single(),
+      supabase.from("tickets").select("*").eq("id", id).maybeSingle(),
       supabase
         .from("ticket_messages")
         .select("*")
@@ -302,7 +272,7 @@ export default function TicketDetailsPage() {
         .order("created_at"),
       supabase
         .from("users")
-        .select("role")
+        .select("role, tenant_id")
         .eq("id", user.id)
         .single(),
       supabase
@@ -319,19 +289,8 @@ export default function TicketDetailsPage() {
 
     const currentRole: Role = roleData?.role ?? "user";
 
+    // The database (RLS) decides who may open a ticket: no row, no access.
     if (!ticketData) {
-      router.replace("/ticket");
-      return;
-    }
-
-    const hasAccess = await checkTicketAccess(
-      currentRole,
-      user.id,
-      user.email ?? "",
-      ticketData
-    );
-
-    if (!hasAccess) {
       router.replace("/ticket");
       return;
     }
@@ -339,6 +298,7 @@ export default function TicketDetailsPage() {
     setTicket(ticketData);
     setMessages(chatData ?? []);
     setRole(currentRole);
+    setMyTenantId(roleData?.tenant_id ?? null);
 
     /* Enrich assignment history with engineer names */
     const assignmentRecords = assignmentData ?? [];
@@ -430,8 +390,8 @@ export default function TicketDetailsPage() {
     };
   }, [id, loadData]);
 
-  /* ── Load who this ticket can be transferred to (people who look after
-        the requester's organisation; worked out on the server) ── */
+  /* ── Load who this ticket can be transferred to (the IT team of
+        the ticket's tenant; worked out on the server) ── */
   const loadEngineers = async () => {
     setEngineers([]);
     if (!ticket) return;
@@ -515,7 +475,7 @@ export default function TicketDetailsPage() {
   }
 
   const isStaff = isStaffRole(role);
-  const can = ticketPermissions({ id: userId, role }, ticket);
+  const can = ticketPermissions({ id: userId, role, tenant_id: myTenantId }, ticket);
 
   // In the conversation, the requester is the "user" side (even an admin who
   // raised a ticket for themselves); everyone else is the support side.

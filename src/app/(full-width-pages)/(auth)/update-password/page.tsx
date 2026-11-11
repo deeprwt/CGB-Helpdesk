@@ -2,10 +2,10 @@ import UpdatePswdForm from "@/components/auth/UpdatePswdForm";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Update Password | Help Desk 360° CGB Solutions ",
+  title: "Set your password | Help Desk 360° CGB Solutions ",
   description: "CGB Solutions | A One-Stop Solution for Your Business",
 };
 
-export default function SignIn() {
+export default function UpdatePassword() {
   return <UpdatePswdForm />;
 }

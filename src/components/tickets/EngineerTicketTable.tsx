@@ -3,7 +3,6 @@
 import * as React from "react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
-import { chunkList, getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 import { DataTable, DATA_TABLE_ALL_ROWS } from "@/components/ui/data-table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -18,10 +17,6 @@ import { timeAgo, STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import { getInitials } from "@/hooks/useCurrentUser"
 
 const DEFAULT_PAGE_SIZE = 50
-/** Requester IDs per request; keeps the URL PostgREST reads short */
-const ID_CHUNK = 150
-/** PostgREST hands back at most this many rows per request */
-const MAX_ROWS = 1000
 
 type Tab = "queue" | "mytask" | "raised" | "all"
 
@@ -36,11 +31,12 @@ type Ticket = {
   category: string | null
   sub_category: string | null
   assignee: string | null
+  tenant_id: string | null
 }
 
 const TAB_COPY: Record<Tab, { description: string; emptyTitle: string; emptyDescription: string }> = {
   queue: {
-    description: "Unassigned tickets from your organisation, newest first.",
+    description: "Unassigned tickets, newest first.",
     emptyTitle: "Queue is clear",
     emptyDescription: "There are no unassigned tickets matching your filters.",
   },
@@ -56,7 +52,7 @@ const TAB_COPY: Record<Tab, { description: string; emptyTitle: string; emptyDesc
   },
   all: {
     description:
-      "Every ticket in your organisation. Tickets assigned to someone else are view only until they are transferred to you.",
+      "Every ticket you can see. Tickets assigned to someone else are view only until they are transferred to you.",
     emptyTitle: "No tickets found",
     emptyDescription: "There are no tickets matching your filters.",
   },
@@ -68,6 +64,9 @@ export default function EngineerTicketTable() {
   const [tickets, setTickets] = React.useState<Ticket[]>([])
   const [tab, setTab] = React.useState<Tab>("queue")
   const [me, setMe] = React.useState<string | null>(null)
+  // Super admins see every tenant's tickets, so each row shows its tenant
+  const [isSuperadmin, setIsSuperadmin] = React.useState(false)
+  const [tenantNames, setTenantNames] = React.useState<Record<string, string>>({})
   const [assigneeNames, setAssigneeNames] = React.useState<Record<string, string>>({})
   const [acquiring, setAcquiring] = React.useState<string | null>(null)
 
@@ -109,61 +108,22 @@ export default function EngineerTicketTable() {
       return q
     }
 
-    let rows: Ticket[] = []
-    let count = 0
-    let failed = false
-
-    if (tab === "queue" || tab === "all") {
-      // Queue / All: tickets raised by anyone in the organisation(s) this person looks after
-      const { data: roleData } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", user.id)
-        .single()
-      const userRole = roleData?.role ?? "engineer"
-      const scoped = (q: ReturnType<typeof base>) => (tab === "queue" ? q.is("assignee", null) : q)
-
-      if (userRole === "superadmin") {
-        // Super admins look after every organisation: no requester filter needed
-        let q = scoped(base())
-        // "All" skips the range; Supabase's own max-rows setting still caps the response
-        if (!showAll) q = q.range(offset, offset + pageSize - 1)
-        const { data, count: c, error } = await q
-        failed = !!error
-        rows = (data ?? []) as Ticket[]
-        count = c ?? 0
-      } else {
-        const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", userRole)
-        const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
-        if (!isActive()) return
-
-        // The requester filter goes in the request URL, so it is sent in batches
-        // of IDs. Each batch returns its newest offset+pageSize rows; merged and
-        // sorted, that gives the exact page (as AskMiraa's ticket lists do).
-        const want = showAll ? MAX_ROWS : Math.min(offset + pageSize, MAX_ROWS)
-        const parts = await Promise.all(
-          chunkList(orgUserIds, ID_CHUNK).map((batch) =>
-            scoped(base().in("requester_id", batch)).limit(want)
-          )
-        )
-        failed = parts.some((p) => !!p.error)
-        count = parts.reduce((sum, p) => sum + (p.count ?? 0), 0)
-        const merged = parts
-          .flatMap((p) => (p.data ?? []) as Ticket[])
-          .sort((a, b) => b.created_at.localeCompare(a.created_at))
-        rows = showAll ? merged : merged.slice(offset, offset + pageSize)
-      }
-    } else {
-      let q =
-        tab === "mytask"
+    // The database (RLS) limits rows to this person's tenant (every tenant
+    // for a super admin), so no organisation filter is needed here.
+    let q =
+      tab === "queue"
+        ? base().is("assignee", null) // Queue: unassigned tickets
+        : tab === "mytask"
           ? base().eq("assignee", user.id) // My tasks: tickets assigned to this engineer
-          : base().eq("requester_id", user.id) // Raised by me: tickets this person raised
-      if (!showAll) q = q.range(offset, offset + pageSize - 1)
-      const { data, count: c, error } = await q
-      failed = !!error
-      rows = (data ?? []) as Ticket[]
-      count = c ?? 0
-    }
+          : tab === "raised"
+            ? base().eq("requester_id", user.id) // Raised by me: tickets this person raised
+            : base() // All tickets
+    // "All" skips the range; Supabase's own max-rows setting still caps the response
+    if (!showAll) q = q.range(offset, offset + pageSize - 1)
+    const { data, count: c, error } = await q
+    const failed = !!error
+    const rows = (data ?? []) as Ticket[]
+    const count = c ?? 0
 
     if (!isActive()) return
 
@@ -194,6 +154,28 @@ export default function EngineerTicketTable() {
     }
     if (isActive()) setAssigneeNames(nameMap)
   }
+
+  /* Super admins: tenant names for the Tenant column (looked up once) */
+  React.useEffect(() => {
+    let active = true
+    ;(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) return
+      const { data: profile } = await supabase.from("users").select("role").eq("id", user.id).single()
+      if (!active || profile?.role !== "superadmin") return
+      setIsSuperadmin(true)
+      const { data: tenants } = await supabase.from("tenants").select("id, name")
+      if (!active) return
+      setTenantNames(
+        Object.fromEntries((tenants ?? []).map((t: { id: string; name: string }) => [t.id, t.name]))
+      )
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   React.useEffect(() => {
     let active = true
@@ -282,6 +264,22 @@ export default function EngineerTicketTable() {
         </span>
       ),
     },
+    ...(isSuperadmin
+      ? ([
+          {
+            accessorKey: "tenant_id",
+            header: "Tenant",
+            cell: ({ row }) => {
+              const tid = row.original.tenant_id
+              return (
+                <span className="whitespace-nowrap text-gray-600 dark:text-gray-300">
+                  {(tid && tenantNames[tid]) ?? "-"}
+                </span>
+              )
+            },
+          },
+        ] as ColumnDef<Ticket>[])
+      : []),
     {
       accessorKey: "location",
       header: "Location",

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { timingSafeEqual } from "crypto"
 import { sendTicketEmail } from "@/lib/email"
 import { loadTicketAdminPicker } from "@/lib/org"
-import { fetchAllRows } from "@/lib/fetch-all-rows"
 
 export const runtime = "nodejs"
 
@@ -10,7 +10,8 @@ export const runtime = "nodejs"
  * SLA Check Cron Endpoint
  * Call this every 1-2 minutes via Vercel Cron, external cron, or Supabase Edge Function.
  *
- * GET /api/sla/check?key=YOUR_CRON_SECRET
+ * GET /api/sla/check   with header  Authorization: Bearer <CRON_SECRET>
+ * Refuses to run when CRON_SECRET is not set.
  *
  * Checks:
  *  1. Tickets not acquired within 10 min → notify admin
@@ -20,14 +21,16 @@ export const runtime = "nodejs"
  */
 export async function GET(req: Request) {
   try {
-    /* Simple auth: cron secret or allow in dev */
-    const { searchParams } = new URL(req.url)
-    const key = searchParams.get("key")
-    // Vercel Cron / pg_net send the secret as "Authorization: Bearer <secret>"
-    const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "")
+    /* Cron secret, sent as "Authorization: Bearer <secret>" (Vercel Cron / pg_net) */
     const cronSecret = process.env.CRON_SECRET
-
-    if (cronSecret && key !== cronSecret && bearer !== cronSecret) {
+    if (!cronSecret) {
+      console.error("SLA check refused: CRON_SECRET is not set")
+      return NextResponse.json({ error: "CRON_SECRET is not configured" }, { status: 503 })
+    }
+    const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? ""
+    const a = Buffer.from(bearer)
+    const b = Buffer.from(cronSecret)
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -40,20 +43,14 @@ export async function GET(req: Request) {
     const now = new Date()
     const results = { admin_alerts: 0, response_breaches: 0, resolution_breaches: 0 }
 
-    // Alerts go to the admins responsible for each requester's organization
-    const [adminsFor, { data: allUsers }] = await Promise.all([
-      loadTicketAdminPicker(supabase),
-      fetchAllRows<{ id: string; email: string | null }>((from, to) =>
-        supabase.from("users").select("id, email").order("id").range(from, to)
-      ),
-    ])
-    const emailById = new Map(allUsers.map((u) => [u.id, u.email]))
+    // Alerts go to the admins of each ticket's tenant
+    const adminsFor = await loadTicketAdminPicker(supabase)
 
     /* ─── 1. 10-minute admin alert (not yet acquired, not yet notified) ─── */
     const tenMinAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString()
     const { data: almostBreached } = await supabase
       .from("tickets")
-      .select("id, subject, requester_name, requester_id, created_at, category, priority, location, contact")
+      .select("id, tenant_id, subject, requester_name, requester_id, created_at, category, priority, location, contact")
       .eq("status", "new")
       .is("assignee", null)
       .eq("sla_admin_notified", false)
@@ -67,12 +64,18 @@ export async function GET(req: Request) {
           .update({ sla_admin_notified: true })
           .eq("id", ticket.id)
 
-        const requesterEmail = emailById.get(ticket.requester_id) ?? null
+        const { data: requester } = await supabase
+          .from("users")
+          .select("email")
+          .eq("id", ticket.requester_id)
+          .maybeSingle()
+        const requesterEmail = requester?.email ?? null
 
-        // Notify each admin of the requester's organization
-        for (const admin of adminsFor(requesterEmail)) {
+        // Notify each admin of the ticket's tenant
+        for (const admin of adminsFor(ticket.tenant_id)) {
           // In-app notification
           await supabase.from("notifications").insert({
+            tenant_id: ticket.tenant_id,
             user_id: admin.id,
             actor_id: ticket.requester_id,
             ticket_id: ticket.id,
@@ -102,7 +105,7 @@ export async function GET(req: Request) {
     const fifteenMinAgo = new Date(now.getTime() - 15 * 60 * 1000).toISOString()
     const { data: responseBreached } = await supabase
       .from("tickets")
-      .select("id, subject, requester_name, requester_id")
+      .select("id, tenant_id, subject, requester_name, requester_id")
       .eq("status", "new")
       .is("assignee", null)
       .eq("sla_response_breached", false)
@@ -110,7 +113,7 @@ export async function GET(req: Request) {
 
     if (responseBreached && responseBreached.length > 0) {
       for (const ticket of responseBreached) {
-        const admins = adminsFor(emailById.get(ticket.requester_id))
+        const admins = adminsFor(ticket.tenant_id)
 
         await supabase
           .from("tickets")
@@ -120,6 +123,7 @@ export async function GET(req: Request) {
         // Log activity
         const systemActorId = admins[0]?.id ?? ticket.requester_id
         await supabase.from("ticket_activity").insert({
+          tenant_id: ticket.tenant_id,
           ticket_id: ticket.id,
           actor_id: systemActorId,
           action: "sla_response_breach",
@@ -128,6 +132,7 @@ export async function GET(req: Request) {
 
         for (const admin of admins) {
           await supabase.from("notifications").insert({
+            tenant_id: ticket.tenant_id,
             user_id: admin.id,
             actor_id: ticket.requester_id,
             ticket_id: ticket.id,
@@ -155,7 +160,7 @@ export async function GET(req: Request) {
     /* ─── 3. 6-hour resolution SLA breach ─── */
     const { data: resolutionBreached } = await supabase
       .from("tickets")
-      .select("id, subject, requester_name, requester_id, assignee")
+      .select("id, tenant_id, subject, requester_name, requester_id, assignee")
       .in("status", ["open", "in_progress"])
       .eq("sla_resolution_breached", false)
       .not("sla_resolution_at", "is", null)
@@ -163,7 +168,7 @@ export async function GET(req: Request) {
 
     if (resolutionBreached && resolutionBreached.length > 0) {
       for (const ticket of resolutionBreached) {
-        const admins = adminsFor(emailById.get(ticket.requester_id))
+        const admins = adminsFor(ticket.tenant_id)
 
         await supabase
           .from("tickets")
@@ -172,6 +177,7 @@ export async function GET(req: Request) {
 
         const systemActorId = ticket.assignee ?? admins[0]?.id ?? ticket.requester_id
         await supabase.from("ticket_activity").insert({
+          tenant_id: ticket.tenant_id,
           ticket_id: ticket.id,
           actor_id: systemActorId,
           action: "sla_resolution_breach",
@@ -196,6 +202,7 @@ export async function GET(req: Request) {
 
         for (const u of uniqueUsers) {
           await supabase.from("notifications").insert({
+            tenant_id: ticket.tenant_id,
             user_id: u.id,
             actor_id: ticket.requester_id,
             ticket_id: ticket.id,

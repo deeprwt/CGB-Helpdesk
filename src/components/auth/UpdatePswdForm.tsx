@@ -52,19 +52,52 @@ export default function UpdatePswdForm() {
   const [confirmPassword, setConfirmPassword] = React.useState("")
   const [loading, setLoading] = React.useState(false)
   const [sessionValid, setSessionValid] = React.useState<boolean | null>(null)
+  // Who the link signed in, to greet invited people properly
+  const [account, setAccount] = React.useState<{ email: string | null; name: string | null; tenant: string | null } | null>(null)
 
   /**
-   * Check recovery session on page load
+   * The link in the invitation / reset email signs the person in. The session
+   * can arrive a moment after the page loads (it is read from the URL), so
+   * wait briefly for it before calling the link invalid.
    */
   React.useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        toast.error("Invalid or expired reset link")
-        setSessionValid(false)
-        return
-      }
+    let settled = false
+
+    const accept = async (userId: string, email: string | null) => {
+      if (settled) return
+      settled = true
       setSessionValid(true)
+      const { data } = await supabase
+        .from("users")
+        .select("full_name, tenant:tenants(name)")
+        .eq("id", userId)
+        .maybeSingle()
+      const row = data as { full_name: string | null; tenant: { name: string } | { name: string }[] | null } | null
+      const tenant = Array.isArray(row?.tenant) ? row?.tenant[0] : row?.tenant
+      setAccount({ email, name: row?.full_name ?? null, tenant: tenant?.name ?? null })
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) accept(data.session.user.id, data.session.user.email ?? null)
     })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) accept(session.user.id, session.user.email ?? null)
+    })
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      setSessionValid(false)
+    }, 2500)
+
+    return () => {
+      settled = true
+      clearTimeout(timer)
+      subscription.unsubscribe()
+    }
   }, [])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -93,9 +126,9 @@ export default function UpdatePswdForm() {
       return
     }
 
-    toast.success("Password updated successfully")
-    await supabase.auth.signOut()
-    router.replace("/signin")
+    // Stay signed in and go straight to the helpdesk
+    toast.success("Password saved. Welcome!")
+    router.replace("/")
   }
 
   if (sessionValid === false) {
@@ -108,10 +141,12 @@ export default function UpdatePswdForm() {
             <ShieldAlert className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-            This password reset link is invalid or expired.
+            This link is invalid or has expired
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Request a new reset link from the sign in page.
+            Links in invitation and reset emails work once and expire after a while. If you were invited,
+            ask your administrator to resend the invitation. If you already have a password, use
+            &ldquo;Forgot password?&rdquo; on the sign in page.
           </p>
           <Button asChild className="mt-6 h-12 w-full font-semibold">
             <Link href="/signin">Go to Sign In</Link>
@@ -135,18 +170,25 @@ export default function UpdatePswdForm() {
             <KeyRound className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Update Password
+            Set your password
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Enter your new password below.
+            {account?.tenant
+              ? `Welcome${account.name ? `, ${account.name}` : ""}! Choose a password to finish setting up your ${account.tenant} helpdesk account.`
+              : "Choose a password for your account. You'll use it with your email to sign in."}
           </p>
+          {account?.email && (
+            <p className="mt-3 inline-flex rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600 dark:bg-white/5 dark:text-gray-300">
+              {account.email}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit}>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="new-password" required>
-                New Password
+                Password
               </FieldLabel>
               <div className="relative">
                 <Lock className={leadingIconClass} />
@@ -156,7 +198,7 @@ export default function UpdatePswdForm() {
                   autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter new password"
+                  placeholder="At least 6 characters"
                   className={`${inputClass} pr-12`}
                   required
                 />
@@ -185,7 +227,7 @@ export default function UpdatePswdForm() {
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm new password"
+                  placeholder="Type it again"
                   className={inputClass}
                   required
                 />
@@ -200,10 +242,10 @@ export default function UpdatePswdForm() {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" />
-                  Updating password...
+                  Saving...
                 </>
               ) : (
-                "Update Password"
+                "Save password and continue"
               )}
             </Button>
           </FieldGroup>

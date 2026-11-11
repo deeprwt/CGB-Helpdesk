@@ -16,9 +16,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { supabase } from "@/lib/supabaseClient"
-import { extractOrgDomain, type Organization } from "@/lib/org"
-import { assetCodeKey, fetchExistingAssetCodes, UNIQUE_VIOLATION } from "@/lib/asset-codes"
+import { apiFetch, ApiError } from "@/lib/api-client"
+import { assetCodeKey, DUPLICATE_CODE, fetchExistingAssetCodes } from "@/lib/asset-codes"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -32,7 +31,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
 
 type SheetRow = Record<string, unknown>
@@ -64,7 +70,6 @@ const ISSUE_META: Record<IssueKind, { label: string; tone: BadgeTone }> = {
   failed: { label: "Failed", tone: "red" },
 }
 
-const norm = (v: unknown) => String(v ?? "").trim().toLowerCase()
 const str = (v: unknown) => {
   const s = String(v ?? "").trim()
   return s === "" ? undefined : s
@@ -81,15 +86,27 @@ function formatDuration(ms: number) {
   return `${s}s`
 }
 
+export type ImportTenant = { id: string; name: string }
+
 export function AssetImportDialog({
-  orgs,
+  tenants = [],
+  defaultTenantId = null,
   onImported,
 }: {
-  orgs: Organization[]
+  /** Super admin only: the tenants to choose from. Empty for everyone else (own tenant). */
+  tenants?: ImportTenant[]
+  /** The tenant pre-selected for a super admin (their own) */
+  defaultTenantId?: string | null
   /** Called once after an import run finishes (to reload the list) */
   onImported: () => void
 }) {
   const [open, setOpen] = React.useState(false)
+  const pickTenant = tenants.length > 0
+  const [tenantId, setTenantId] = React.useState<string | null>(defaultTenantId)
+  React.useEffect(() => {
+    setTenantId((t) => t ?? defaultTenantId)
+  }, [defaultTenantId])
+  const targetTenant = pickTenant ? tenantId : null
   const [stage, setStage] = React.useState<Stage>("select")
   const [file, setFile] = React.useState<File | null>(null)
   const [plan, setPlan] = React.useState<Plan | null>(null)
@@ -134,7 +151,7 @@ export function AssetImportDialog({
   const handleDownloadTemplate = () => {
     const templateData = [
       {
-        organization_domain: "cgbindia.com",
+        company: "Acme Corp",
         asset_code: "CGB-001",
         asset_type: "Laptop",
         model: "Dell Latitude 5520",
@@ -170,7 +187,8 @@ export function AssetImportDialog({
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       // raw:false + dateNF turns Excel date cells into "2025-01-15" instead of serial numbers
       const rows = XLSX.utils.sheet_to_json<SheetRow>(sheet, { raw: false, dateNF: "yyyy-mm-dd" })
-      const existing = await fetchExistingAssetCodes()
+      // Codes are unique per tenant: a super admin checks the chosen tenant only
+      const existing = await fetchExistingAssetCodes(targetTenant)
 
       const seenInFile = new Map<string, number>() // code key → first row number
       const toImport: PlannedRow[] = []
@@ -213,66 +231,45 @@ export function AssetImportDialog({
   }
 
   /* ---------------- STEP 2: IMPORT WITH PROGRESS ---------------- */
-  const importOne = async (
-    { code, row: r }: PlannedRow,
-    userIdByEmail: Map<string, string | null>
-  ): Promise<string | null> => {
-    // Organization: explicit column, else the assigned user's email domain
+  // One POST /api/assets per row; the server validates the company, the person and
+  // the code before creating anything, so a failed row leaves nothing behind.
+  const importOne = async ({ code, row: r }: PlannedRow): Promise<string | null> => {
+    const company = str(r.company) ?? str(r.company_name)
     const assignedEmail = str(r.assigned_user_email)
-    const orgDomain = norm(r.organization_domain || (assignedEmail ? extractOrgDomain(assignedEmail) : ""))
-    const org = orgs.find((o) => o.domain === orgDomain)
 
-    const { data: asset, error } = await supabase
-      .from("assets")
-      .insert({
-        ...(org ? { organization_id: org.id } : {}),
-        asset_code: code,
-        asset_type: str(r.asset_type),
-        model: str(r.model) ?? "",
-        status: str(r.status) ?? "in_use",
-        location: str(r.location) ?? null,
-        department: str(r.department) ?? "",
-        purchase_date: str(r.purchase_date) || null,
-        warranty_expiry: str(r.warranty_expiry) || null,
+    try {
+      await apiFetch<{ id: string }>("/api/assets", {
+        method: "POST",
+        body: {
+          asset: {
+            ...(company ? { company_name: company } : {}),
+            asset_code: code,
+            asset_type: str(r.asset_type),
+            model: str(r.model) ?? "",
+            status: str(r.status) ?? "in_use",
+            location: str(r.location) ?? "",
+            department: str(r.department) ?? "",
+            purchase_date: str(r.purchase_date) ?? "",
+            warranty_expiry: str(r.warranty_expiry) ?? "",
+          },
+          details: {
+            serial_no: str(r.serial_no),
+            cpu: str(r.cpu),
+            ram: str(r.ram),
+            storage: str(r.storage),
+            os_name: str(r.os_name),
+            mac_address: str(r.mac_address),
+            vendor: str(r.vendor),
+          },
+          ...(assignedEmail ? { assigned_user_email: assignedEmail } : {}),
+          ...(targetTenant ? { tenant_id: targetTenant } : {}),
+        },
       })
-      .select()
-      .single()
-
-    if (error || !asset) {
-      if (error?.code === UNIQUE_VIOLATION) return "Asset code already exists"
-      return error?.message ?? "Asset was not created"
-    }
-
-    const detailRows = Object.entries({
-      serial_no: str(r.serial_no),
-      cpu: str(r.cpu),
-      ram: str(r.ram),
-      storage: str(r.storage),
-      os_name: str(r.os_name),
-      mac_address: str(r.mac_address),
-      vendor: str(r.vendor),
-    })
-      .filter(([, v]) => v)
-      .map(([key, value]) => ({ asset_id: asset.id, key, value }))
-
-    if (detailRows.length) {
-      await supabase.from("asset_details").insert(detailRows)
-    }
-
-    if (assignedEmail) {
-      // Look each email up once per run
-      if (!userIdByEmail.has(assignedEmail)) {
-        const { data: user } = await supabase
-          .from("users")
-          .select("id")
-          .eq("email", assignedEmail)
-          .single()
-        userIdByEmail.set(assignedEmail, user?.id ?? null)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        return err.code === DUPLICATE_CODE ? "Asset code already exists" : err.message
       }
-      const userId = userIdByEmail.get(assignedEmail)
-      if (userId) {
-        await supabase.from("asset_assignments").insert({ asset_id: asset.id, user_id: userId })
-      }
+      throw err
     }
 
     return null
@@ -281,7 +278,6 @@ export function AssetImportDialog({
   const handleImport = async () => {
     if (!plan || plan.toImport.length === 0) return
     const startedAt = Date.now()
-    const userIdByEmail = new Map<string, string | null>()
     const failed: Issue[] = []
     let imported = 0
 
@@ -295,7 +291,7 @@ export function AssetImportDialog({
 
       let failure: string | null
       try {
-        failure = await importOne(item, userIdByEmail)
+        failure = await importOne(item)
       } catch (err) {
         failure = err instanceof Error ? err.message : "Unexpected error"
       }
@@ -372,6 +368,31 @@ export function AssetImportDialog({
         {/* ── Step 1: template + file ─────────────────────────────────── */}
         {(stage === "select" || stage === "checking") && (
           <FieldGroup className="gap-4">
+            {pickTenant && (
+              <Field>
+                <FieldLabel htmlFor="asset-import-tenant">Organisation</FieldLabel>
+                <Select
+                  value={tenantId ?? undefined}
+                  onValueChange={setTenantId}
+                  disabled={busy}
+                >
+                  <SelectTrigger id="asset-import-tenant" className="w-full">
+                    <SelectValue placeholder="Select organisation" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tenants.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  Every row is imported into this organisation; companies and emails are matched inside it.
+                </FieldDescription>
+              </Field>
+            )}
+
             <Field>
               <FieldLabel>1. Get the template</FieldLabel>
               <div className="flex items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-white/10">
@@ -413,7 +434,12 @@ export function AssetImportDialog({
                 ) : (
                   <>
                     <p className="text-sm text-gray-600 dark:text-gray-300">Excel (.xlsx) or CSV file</p>
-                    <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={pickTenant && !tenantId}
+                      onClick={() => inputRef.current?.click()}
+                    >
                       Choose file
                     </Button>
                   </>
@@ -429,6 +455,11 @@ export function AssetImportDialog({
             <div className="flex items-center gap-2 rounded-xl border border-gray-200 p-3 dark:border-white/10">
               <FileSpreadsheet className="size-4 shrink-0 text-emerald-600" />
               <p className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900 dark:text-white">{file?.name}</p>
+              {pickTenant && (
+                <StatusBadge tone="indigo" className="shrink-0">
+                  {tenants.find((t) => t.id === tenantId)?.name ?? "Organisation"}
+                </StatusBadge>
+              )}
               <Button
                 variant="ghost"
                 size="icon-sm"

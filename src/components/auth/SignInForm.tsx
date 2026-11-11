@@ -138,10 +138,6 @@ export default function SignInForm() {
     }, 800)
   }
 
-  // async function signInWithGoogle() {
-  //   await supabase.auth.signInWithOAuth({ provider: "google" })
-  // }
-
   return (
     <div className="flex w-full flex-1 flex-col overflow-y-auto no-scrollbar lg:w-1/2">
       <div className="mx-auto mb-5 w-full max-w-md sm:pt-10">
@@ -167,25 +163,9 @@ export default function SignInForm() {
             Sign In
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Enter your email and password to sign in!
+            Enter your email and password to sign in.
           </p>
         </div>
-        {/*
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-5">
-          <Button type="button" variant="outline" className="h-12" onClick={signInWithGoogle}>
-            Sign in with Google
-          </Button>
-          <Button type="button" variant="outline" className="h-12">
-            Sign in with X
-          </Button>
-        </div>
-
-        <div className="relative py-3 sm:py-5">
-          <Separator />
-          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-sm text-gray-400 dark:bg-gray-900">
-            Or
-          </span>
-        </div> */}
 
         <form onSubmit={handleSubmit}>
           <FieldGroup>
@@ -319,14 +299,7 @@ export default function SignInForm() {
         </form>
 
         <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          Don&apos;t have an account?{" "}
-          <Button
-            asChild
-            variant="link"
-            className="h-auto p-0 font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-          >
-            <Link href="/signup">Sign Up</Link>
-          </Button>
+          Access is by invitation only. New here? Ask your IT administrator to invite you.
         </p>
       </div>
 

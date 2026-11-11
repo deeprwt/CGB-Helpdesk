@@ -27,7 +27,6 @@ import { EmptyState } from "@/components/common/empty-state";
 import { ArrowRight, MoreVertical, UserRound, UsersRound } from "lucide-react";
 import { getInitials } from "@/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabaseClient";
-import { getUserAccessibleDomains, buildEmailDomainFilter } from "@/lib/org";
 
 type UserRole = "user" | "engineer" | "admin" | "superadmin";
 
@@ -36,6 +35,8 @@ interface OnlineEngineer {
   full_name: string;
   avatar_url: string | null;
   last_seen_at: string;
+  /** Shown to super admins, who see engineers of every tenant */
+  tenant_name?: string | null;
 }
 
 export default function TeammatesCard() {
@@ -125,19 +126,27 @@ export default function TeammatesCard() {
         Date.now() - 2 * 60 * 1000
       ).toISOString();
 
-      // Scope to accessible org(s) engineers
-      const domains = await getUserAccessibleDomains(supabase, user.id, user.email ?? "", profile.role);
-
+      // The database limits this to the viewer's tenant (super admins: every tenant)
       const { data } = await supabase
         .from("users")
-        .select("id, full_name, avatar_url, last_seen_at")
+        .select("id, full_name, avatar_url, last_seen_at, tenant:tenants(name)")
         .eq("role", "engineer")
-        .or(buildEmailDomainFilter(domains))
         .gte("last_seen_at", onlineCutoff)
         .order("last_seen_at", { ascending: false })
         .limit(5);
 
-      setEngineers(data ?? []);
+      const rows = (data ?? []) as unknown as (Omit<OnlineEngineer, "tenant_name"> & {
+        tenant: { name: string } | { name: string }[] | null;
+      })[];
+
+      setEngineers(
+        rows.map(({ tenant, ...e }) => ({
+          ...e,
+          tenant_name: profile.role === "superadmin"
+            ? (Array.isArray(tenant) ? tenant[0]?.name : tenant?.name) ?? null
+            : null,
+        }))
+      );
       setReady(true);
     };
 
@@ -150,7 +159,7 @@ export default function TeammatesCard() {
   }
 
   const title =
-    role === "admin" ? "Online Engineers" : "Teammates";
+    role === "admin" || role === "superadmin" ? "Online Engineers" : "Teammates";
 
   return (
     <Card className="h-full gap-4">
@@ -165,7 +174,7 @@ export default function TeammatesCard() {
           Engineers active in the last 2 minutes
         </CardDescription>
 
-        {role === "admin" && (
+        {(role === "admin" || role === "superadmin") && (
           <CardAction>
             <Button
               asChild
@@ -173,7 +182,7 @@ export default function TeammatesCard() {
               size="sm"
               className="text-brand-600 hover:bg-brand-50 hover:text-brand-700 dark:text-brand-300 dark:hover:bg-brand-500/10"
             >
-              <Link href="/engineers">
+              <Link href="/user">
                 View All
                 <ArrowRight className="h-4 w-4" />
               </Link>
@@ -222,6 +231,11 @@ export default function TeammatesCard() {
                       <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     </span>
                     Online
+                    {engineer.tenant_name && (
+                      <span className="truncate text-gray-500 dark:text-gray-400">
+                        · {engineer.tenant_name}
+                      </span>
+                    )}
                   </p>
                 </div>
 

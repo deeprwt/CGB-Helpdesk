@@ -108,7 +108,7 @@ const RADIO_PILL =
 /* -----------------------------------
    Types
 ----------------------------------- */
-type Role = "user" | "engineer" | "admin"
+type Role = "user" | "engineer" | "admin" | "superadmin"
 
 type UserLite = {
   id: string
@@ -116,16 +116,17 @@ type UserLite = {
   email: string
   phone: number | null
   role: Role
+  tenant_id: string | null
 }
 
-type AssignedAsset = {
-  asset_id: string
-  assets: {
-    asset_code: string
-    asset_type: string
-    model: string | null
-  }
+type AssetOption = {
+  id: string
+  asset_code: string
+  asset_type: string
+  model: string | null
 }
+
+const USER_COLUMNS = "id, full_name, email, phone, role, tenant_id"
 
 export default function CreateTicketForm() {
   const router = useRouter()
@@ -137,13 +138,15 @@ export default function CreateTicketForm() {
 
   const [users, setUsers] = React.useState<UserLite[]>([])
   const [selectedUser, setSelectedUser] = React.useState<UserLite | null>(null)
+  // Super admins pick people from every tenant: show which tenant each is in
+  const [tenantNames, setTenantNames] = React.useState<Record<string, string>>({})
 
   const [requesterName, setRequesterName] = React.useState("")
   const [contact, setContact] = React.useState("")
 
   const [assetRelated, setAssetRelated] =
     React.useState<"yes" | "no">("no")
-  const [assets, setAssets] = React.useState<AssignedAsset[]>([])
+  const [assets, setAssets] = React.useState<AssetOption[]>([])
   const [assetsLoaded, setAssetsLoaded] = React.useState(false)
 
   /* UI-only state for the attachment drop area */
@@ -161,9 +164,9 @@ export default function CreateTicketForm() {
 
       const { data: me } = await supabase
         .from("users")
-        .select("id, full_name, email, phone, role")
+        .select(USER_COLUMNS)
         .eq("id", auth.user.id)
-        .single()
+        .single<UserLite>()
 
       if (!me) return
 
@@ -173,12 +176,21 @@ export default function CreateTicketForm() {
       setContact(me.phone?.toString() ?? "")
 
       if (me.role !== "user") {
+        // The database (RLS) returns this person's tenant; a super admin gets everyone
         const { data } = await supabase
           .from("users")
-          .select("id, full_name, email, phone, role")
+          .select(USER_COLUMNS)
           .order("full_name")
+          .returns<UserLite[]>()
 
         setUsers(data ?? [])
+
+        if (me.role === "superadmin") {
+          const { data: tenants } = await supabase.from("tenants").select("id, name")
+          setTenantNames(
+            Object.fromEntries((tenants ?? []).map((t: { id: string; name: string }) => [t.id, t.name]))
+          )
+        }
       }
     }
 
@@ -186,7 +198,11 @@ export default function CreateTicketForm() {
   }, [])
 
   /* -----------------------------------
-     Load assigned assets
+     Load assets that can be linked.
+     The database (RLS) decides what is visible: the IT team sees its
+     tenant's assets, a user only the assets assigned to them. Staff raising
+     a ticket for someone only get assets of that person's tenant (a ticket
+     belongs to its requester's tenant).
   ----------------------------------- */
   React.useEffect(() => {
     if (assetRelated !== "yes" || !selectedUser) {
@@ -195,29 +211,27 @@ export default function CreateTicketForm() {
       return
     }
 
+    let active = true
     const loadAssets = async () => {
       setAssetsLoaded(false)
 
-      const { data } = await supabase
-        .from("asset_assignments")
-        .select(`
-          asset_id,
-          assets:assets!asset_assignments_asset_id_fkey!inner (
-            asset_code,
-            asset_type,
-            model
-          )
-        `)
-        .eq("user_id", selectedUser.id)
-        .is("returned_at", null)
-        .returns<AssignedAsset[]>()
+      let q = supabase
+        .from("assets")
+        .select("id, asset_code, asset_type, model")
+        .order("asset_code")
+      if (role !== "user" && selectedUser.tenant_id) q = q.eq("tenant_id", selectedUser.tenant_id)
 
+      const { data } = await q.returns<AssetOption[]>()
+      if (!active) return
       setAssets(data ?? [])
       setAssetsLoaded(true)
     }
 
     loadAssets()
-  }, [assetRelated, selectedUser])
+    return () => {
+      active = false
+    }
+  }, [assetRelated, selectedUser, role])
 
   /* -----------------------------------
      Submit
@@ -323,6 +337,11 @@ export default function CreateTicketForm() {
                                 · {selectedUser.email}
                               </span>
                             )}
+                            {selectedUser?.tenant_id && tenantNames[selectedUser.tenant_id] && (
+                              <span className="ml-1.5 text-muted-foreground">
+                                · {tenantNames[selectedUser.tenant_id]}
+                              </span>
+                            )}
                           </span>
                         </span>
                         <ChevronsUpDown className="opacity-50" />
@@ -343,7 +362,11 @@ export default function CreateTicketForm() {
                                 // Unique per user — the default (display text) mixes up
                                 // people with the same name; keywords keep search working
                                 value={u.id}
-                                keywords={[u.full_name ?? "", u.email ?? ""]}
+                                keywords={[
+                                  u.full_name ?? "",
+                                  u.email ?? "",
+                                  (u.tenant_id && tenantNames[u.tenant_id]) || "",
+                                ]}
                                 onSelect={() => {
                                   setSelectedUser(u)
                                   setRequesterName(u.full_name)
@@ -356,12 +379,17 @@ export default function CreateTicketForm() {
                                     selectedUser?.id === u.id ? "opacity-100" : "opacity-0"
                                   )}
                                 />
-                                <span className="flex min-w-0 flex-col">
+                                <span className="flex min-w-0 flex-1 flex-col">
                                   <span className="truncate">{u.full_name}</span>
                                   <span className="truncate text-xs text-muted-foreground">
                                     {u.email}
                                   </span>
                                 </span>
+                                {u.tenant_id && tenantNames[u.tenant_id] && (
+                                  <span className="ml-2 shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-white/5 dark:text-gray-300">
+                                    {tenantNames[u.tenant_id]}
+                                  </span>
+                                )}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -539,8 +567,8 @@ export default function CreateTicketForm() {
                       </SelectTrigger>
                       <SelectContent>
                         {assets.map((a) => (
-                          <SelectItem key={a.asset_id} value={a.asset_id}>
-                            {a.assets.asset_code} — {a.assets.asset_type}
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.asset_code} — {a.asset_type}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -549,7 +577,9 @@ export default function CreateTicketForm() {
                     <Skeleton className="h-11 w-full" />
                   ) : (
                     <FieldDescription className="flex h-11 items-center">
-                      No assets are currently assigned to this user.
+                      {role === "user"
+                        ? "No assets are currently assigned to you."
+                        : "No assets found in this person's tenant."}
                     </FieldDescription>
                   )}
                 </Field>

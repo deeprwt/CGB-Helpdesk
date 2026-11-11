@@ -5,6 +5,8 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import type { ColumnDef } from "@tanstack/react-table"
 import { supabase } from "@/lib/supabaseClient"
+import { apiFetch } from "@/lib/api-client"
+import { useCurrentUser } from "@/hooks/useCurrentUser"
 import { cn } from "@/lib/utils"
 import {
   Card,
@@ -50,7 +52,10 @@ type Asset = {
   room: string | null
   purchase_date: string | null
   warranty_expiry: string | null
-  organization: { name: string; domain: string } | null
+  organization: { name: string; domain: string | null } | null
+  tenant_id: string | null
+  /** Super admin only: the tenant's name */
+  tenant_name: string | null
 }
 
 type AssetDetail = {
@@ -290,6 +295,9 @@ export default function AssetDetailsPage() {
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
 
+  const { user: me } = useCurrentUser()
+  const isSuperAdmin = me?.role === "superadmin"
+
   React.useEffect(() => {
     const loadAll = async () => {
       setLoading(true)
@@ -310,6 +318,18 @@ export default function AssetDetailsPage() {
           .eq("id", asset.organization_id)
           .single()
         organization = org ?? null
+      }
+
+      // Super admins see every tenant's assets, so name the one this belongs to
+      // (RLS only lets a super admin read other tenants' names)
+      let tenant_name: string | null = null
+      if (asset?.tenant_id) {
+        const { data: tenant } = await supabase
+          .from("tenants")
+          .select("name")
+          .eq("id", asset.tenant_id)
+          .maybeSingle()
+        tenant_name = tenant?.name ?? null
       }
 
       /* 2️⃣ DETAILS */
@@ -353,7 +373,7 @@ export default function AssetDetailsPage() {
           isCurrent: a.returned_at === null,
         })) ?? []
 
-      setAsset(asset ? { ...asset, organization } : null)
+      setAsset(asset ? { ...asset, organization, tenant_name } : null)
       setDetails(details ?? [])
       setAssignments(mappedAssignments)
       setLoading(false)
@@ -362,13 +382,18 @@ export default function AssetDetailsPage() {
     loadAll()
   }, [id])
 
-  /* ---------------- DELETE (same queries as the asset list) ---------------- */
+  /* ---------------- DELETE (server removes details + assignments too) ---------------- */
   const handleDelete = async () => {
     setDeleting(true)
 
-    await supabase.from("asset_assignments").delete().eq("asset_id", id)
-    await supabase.from("asset_details").delete().eq("asset_id", id)
-    await supabase.from("assets").delete().eq("id", id)
+    try {
+      await apiFetch(`/api/assets/${id}`, { method: "DELETE" })
+    } catch (err) {
+      toast.error(`Failed to delete asset: ${err instanceof Error ? err.message : "Unexpected error"}`)
+      setDeleting(false)
+      setConfirmDelete(false)
+      return
+    }
 
     toast.success("Asset deleted")
     router.push("/assets")
@@ -426,6 +451,9 @@ export default function AssetDetailsPage() {
           description={[asset.asset_type, asset.model].filter(Boolean).join(" · ")}
           meta={[
             { label: status.label, dot: status.dot },
+            ...(isSuperAdmin && asset.tenant_name
+              ? [{ label: asset.tenant_name, dot: "bg-indigo-400" }]
+              : []),
             ...(asset.organization
               ? [{ label: asset.organization.name, dot: "bg-brand-400" }]
               : []),
@@ -481,13 +509,20 @@ export default function AssetDetailsPage() {
             />
             <CardContent>
               <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <DetailItem label="Organization">
+                {isSuperAdmin && (
+                  <DetailItem label="Organisation">
+                    {asset.tenant_name ?? <Dash />}
+                  </DetailItem>
+                )}
+                <DetailItem label="Company">
                   {asset.organization ? (
                     <>
                       {asset.organization.name}
-                      <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
-                        {asset.organization.domain}
-                      </span>
+                      {asset.organization.domain && (
+                        <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">
+                          {asset.organization.domain}
+                        </span>
+                      )}
                     </>
                   ) : (
                     <Dash />

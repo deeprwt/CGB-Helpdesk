@@ -26,7 +26,11 @@ import {
 type Organization = {
   id: string
   name: string
-  domain: string
+  domain: string | null
+  /** The tenant the company is in: only given to a super admin. */
+  tenant_name?: string | null
+  /** The company the signed-in admin works for. */
+  mine?: boolean
   connected: boolean
   askmira_workspace_id: string | null
   askmira_workspace: string | null
@@ -56,6 +60,11 @@ const GRANTS = [
   "Show your HR your company's tickets and assets, and your IT team what the helpdesk shows them.",
   "AskMiraa never changes anyone's role here: your IT team decides who are engineers and admins.",
 ]
+
+/** "Acme", or "Acme (Tenant)" for a super admin choosing across tenants. */
+function companyLabel(o: Organization) {
+  return o.tenant_name ? `${o.name} (${o.tenant_name})` : o.name
+}
 
 function readRequest(): Request | null {
   const q = new URLSearchParams(window.location.search)
@@ -120,11 +129,9 @@ export default function ConnectAskMira() {
       }
       const organizations: Organization[] = data.organizations ?? []
       if (!organizations.length) {
-        return setStage({ kind: "refused", message: "You don't look after any company in the helpdesk." })
+        return setStage({ kind: "refused", message: "Your organisation has no active companies in the helpdesk yet." })
       }
-      const { data: auth } = await supabase.auth.getUser()
-      const domain = auth.user?.email?.split("@")[1]?.toLowerCase()
-      const preferred = organizations.find((o) => o.domain === domain) ?? organizations[0]
+      const preferred = organizations.find((o) => o.mine) ?? organizations[0]
       setOrganizationId(preferred.id)
       setStage({ kind: "ready", organizations })
     }
@@ -253,7 +260,7 @@ export default function ConnectAskMira() {
                   <SelectContent>
                     {stage.organizations.map((o) => (
                       <SelectItem key={o.id} value={o.id}>
-                        {o.name} ({o.domain})
+                        {companyLabel(o)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -261,7 +268,7 @@ export default function ConnectAskMira() {
               ) : (
                 <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-800 dark:border-white/10 dark:text-gray-200">
                   <Building2 className="size-4 text-gray-400" />
-                  {stage.organizations[0].name} ({stage.organizations[0].domain})
+                  {companyLabel(stage.organizations[0])}
                 </div>
               )}
             </Field>

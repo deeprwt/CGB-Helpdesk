@@ -3,7 +3,7 @@
 //
 //   Event                  Requester        Assigned engineer   IT team of the org   Admins of the org
 //   ─────────────────────  ───────────────  ──────────────────  ───────────────────  ─────────────────
-//   created                email (details)  —                   web                  (part of IT team)
+//   created                email (details)  —                   web (same tenant)    (part of IT team)
 //   acquired               web + email      —                   —                    —
 //   closed/hold/reopened   web + email      web + email         —                    —
 //   transferred/escalated  web + email      new: web + email    —                    web + email
@@ -26,6 +26,7 @@ export type TicketEvent = "created" | "acquired" | "closed" | "hold" | "reopened
 
 export type NotifyTicket = {
   id: string
+  tenant_id: string
   subject: string
   requester_id: string
   requester_name?: string | null
@@ -96,7 +97,6 @@ export async function notifyTicketEvent(
     (id && byId.get(id)?.full_name?.trim()) || fallback
 
   const requester = recipient(ticket.requester_id)!
-  const requesterEmail = byId.get(ticket.requester_id)?.email ?? null
   const requesterName = nameOf(ticket.requester_id, ticket.requester_name?.trim() || "User")
   const actorName = nameOf(actorId, byId.get(actorId)?.email ?? "Support Team")
 
@@ -124,12 +124,12 @@ export async function notifyTicketEvent(
         },
       })
 
-      // The IT team that looks after this organisation sees it in the app
+      // The IT team of the ticket's tenant sees it in the app
       const staffFor = await loadTicketStaffPicker(db)
       const message = onBehalf
         ? `raised a new ticket #${ref} for ${requesterName}`
         : `raised a new ticket #${ref}`
-      for (const s of staffFor(requesterEmail)) {
+      for (const s of staffFor(ticket.tenant_id)) {
         deliveries.push({
           to: { id: s.id, email: s.email, name: s.name },
           web: { type: "status_changed", message },
@@ -224,12 +224,12 @@ export async function notifyTicketEvent(
         })
       }
 
-      // Escalation: the admins looking after this organisation are told too
+      // Escalation: the admins of the ticket's tenant are told too
       const adminsFor = await loadTicketAdminPicker(db)
       const adminMessage = prevEngineer
         ? `transferred ticket #${ref} from ${prevName} to ${newName}`
         : `assigned ticket #${ref} to ${newName}`
-      for (const a of adminsFor(requesterEmail)) {
+      for (const a of adminsFor(ticket.tenant_id)) {
         deliveries.push({
           to: { id: a.id, email: a.email, name: a.name },
           web: { type: "status_changed", message: adminMessage },
@@ -255,6 +255,7 @@ export async function notifyTicketEvent(
   const webRows = final
     .filter((d) => d.web && d.to.id !== actorId)
     .map((d) => ({
+      tenant_id: ticket.tenant_id,
       user_id: d.to.id,
       actor_id: actorId,
       ticket_id: ticket.id,

@@ -4,7 +4,14 @@
 // the helpdesk for a connected organization: it sends the whole roster when
 // it connects, every night, and whenever its admin presses Sync. Here:
 //
-// * Someone new gets an account (no password: they come in from AskMiraa).
+// The connected organization is a client company inside one tenant. Its
+// roster here is the accounts with `users.organization_id` = that company.
+//
+// * Someone new gets an account in the company's tenant, linked to the company
+//   (no password: they come in from AskMiraa).
+// * Someone who already has an account in the same tenant but no company is
+//   linked to this company. Someone with an account in another tenant (one
+//   tenant per person) or with another company here is skipped, with a reason.
 // * Their name, employee code, department and designation follow AskMiraa.
 // * Roles here are this helpdesk's own: AskMiraa never makes anyone an engineer
 //   or an admin, because those roles reach every organization the helpdesk
@@ -21,10 +28,9 @@ import {
   EMAIL_RE,
   allRows,
   clean,
+  chunks,
   db,
-  domainOf,
   eachLimited,
-  escapeLike,
   httpError,
   normEmail,
   type Organization,
@@ -49,6 +55,9 @@ type Existing = Person & {
   department: string | null
   designation: string | null
 }
+
+const EXISTING_COLUMNS =
+  "id, email, full_name, role, phone, tenant_id, organization_id, employee_id, department, designation"
 
 type Managed = {
   organization_id: string
@@ -92,37 +101,46 @@ export function roleFor(current: string, before: string | null): { role: string 
   return { role: null, before: null }
 }
 
-/** A new account for someone AskMiraa sent: no password, they arrive from AskMiraa. */
+/**
+ * A new account for someone AskMiraa sent: in the company's tenant, linked to
+ * the company, as a user. No password: they arrive from AskMiraa.
+ */
 export async function createPerson(
   org: Organization,
   person: Pick<Incoming, "id" | "email" | "name" | "role"> & Partial<Incoming>
 ): Promise<Person> {
   const name = person.name || person.email
+  // Everyone starts as a user: the IT team makes engineers and admins here.
+  const role = "user"
   const { data, error } = await db().auth.admin.createUser({
     email: person.email,
     email_confirm: true,
     user_metadata: { ...nameParts(name), full_name: name },
-    app_metadata: { askmira: true },
+    // The sign-up trigger makes a profile only for accounts that carry a tenant.
+    app_metadata: { askmira: true, tenant_id: org.tenant_id, role },
   })
   if (error || !data?.user) {
     throw httpError(409, `Could not create a ${BRAND} account: ${error?.message ?? "no user"}`.slice(0, 200))
   }
   const id = data.user.id
-  // Everyone starts as a user: the IT team makes engineers and admins here.
-  const role = "user"
   // The sign-up trigger usually makes this row already; fill in what AskMiraa knows.
-  const profile: Record<string, unknown> = { id, email: person.email, full_name: name, role }
+  const profile: Record<string, unknown> = {
+    id,
+    email: person.email,
+    full_name: name,
+    role,
+    tenant_id: org.tenant_id,
+    organization_id: org.id,
+  }
   if (person.employee_code) profile.employee_id = person.employee_code
   if (person.department) profile.department = person.department
   if (person.designation) profile.designation = person.designation
   const { error: profileError } = await db().from("users").upsert(profile, { onConflict: "id" })
-  if (profileError) throw profileError
-  await db()
-    .from("user_organization_access")
-    .upsert(
-      { user_id: id, organization_id: org.id },
-      { onConflict: "user_id,organization_id", ignoreDuplicates: true }
-    )
+  if (profileError) {
+    // No half-made accounts: without a profile it could sign in to nothing anyway.
+    await db().auth.admin.deleteUser(id).catch(() => {})
+    throw profileError
+  }
   const { error: managedError } = await db().from("askmira_people").upsert(
     {
       organization_id: org.id,
@@ -135,7 +153,15 @@ export async function createPerson(
     { onConflict: "organization_id,user_id" }
   )
   if (managedError) throw managedError
-  return { id, email: person.email, full_name: name, role, phone: null }
+  return {
+    id,
+    email: person.email,
+    full_name: name,
+    role,
+    phone: null,
+    tenant_id: org.tenant_id,
+    organization_id: org.id,
+  }
 }
 
 /** One person's managed row, if AskMiraa manages them in this organization. */
@@ -150,9 +176,24 @@ export async function managedRow(org: Organization, userId: string): Promise<Man
 }
 
 /**
- * Brings an existing account in step with AskMiraa: AskMiraa manages it from now
- * on (and any admin role an earlier version granted goes back). Used when
- * someone signs in from AskMiraa.
+ * Why an existing account can't be one of this company's people, or null if it
+ * can: it must be in the company's tenant (one tenant per person), and either
+ * already with this company or with none yet (then it is linked to this one).
+ */
+export function refusalFor(org: Organization, person: Pick<Person, "role" | "tenant_id" | "organization_id">) {
+  if (person.role === "superadmin") return `a ${BRAND} super admin`
+  if (person.tenant_id !== org.tenant_id) return `already has a ${BRAND} account with another organisation`
+  if (person.organization_id && person.organization_id !== org.id) {
+    return `works for another company in ${BRAND}`
+  }
+  return null
+}
+
+/**
+ * Brings an existing account in step with AskMiraa: linked to this company if
+ * it had none, managed by AskMiraa from now on (and any admin role an earlier
+ * version granted goes back). Used when someone signs in from AskMiraa; the
+ * caller has checked `refusalFor`.
  */
 export async function adopt(
   org: Organization,
@@ -161,8 +202,15 @@ export async function adopt(
 ): Promise<Person> {
   const row = await managedRow(org, person.id)
   const next = roleFor(person.role, row?.role_before_grant ?? null)
-  if (next.role) {
-    const { error } = await db().from("users").update({ role: next.role }).eq("id", person.id)
+  const patch: Record<string, unknown> = {}
+  if (next.role) patch.role = next.role
+  if (!person.organization_id) patch.organization_id = org.id
+  if (Object.keys(patch).length) {
+    const { error } = await db()
+      .from("users")
+      .update(patch)
+      .eq("id", person.id)
+      .eq("tenant_id", org.tenant_id)
     if (error) throw error
   }
   const { error } = await db().from("askmira_people").upsert(
@@ -177,7 +225,11 @@ export async function adopt(
     { onConflict: "organization_id,user_id" }
   )
   if (error) throw error
-  return next.role ? { ...person, role: next.role } : person
+  return {
+    ...person,
+    role: next.role ?? person.role,
+    organization_id: person.organization_id ?? org.id,
+  }
 }
 
 /** The full roster from AskMiraa: add, update and switch off to match it. */
@@ -189,11 +241,13 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
     throw httpError(422, "The roster was empty, so nobody was changed.")
   }
 
+  // The company's people here: whoever works for it, whatever their address.
   const existing = await allRows<Existing>((from, to) =>
     db()
       .from("users")
-      .select("id, email, full_name, role, phone, employee_id, department, designation")
-      .ilike("email", `%@${escapeLike(org.domain)}`)
+      .select(EXISTING_COLUMNS)
+      .eq("organization_id", org.id)
+      .eq("tenant_id", org.tenant_id)
       .order("id")
       .range(from, to)
   )
@@ -220,6 +274,7 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
   const seen = new Set<string>()
   const toCreate: Incoming[] = []
   const toUpdate: { person: Incoming; current: Existing }[] = []
+  const valid: Incoming[] = []
 
   for (const raw of people) {
     const person = incoming(raw)
@@ -229,17 +284,28 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
     }
     if (seen.has(person.email)) continue
     seen.add(person.email)
-    if (domainOf(person.email) !== org.domain) {
-      skipped.push({
-        email: person.email,
-        reason: `not an address on ${org.domain}, the company's domain in ${BRAND}`,
-      })
+    valid.push(person)
+  }
+
+  // Addresses not on the company's roster here may still have an account: in
+  // this tenant without a company (linked now), or elsewhere (skipped).
+  const others = new Map<string, Existing>()
+  const unknown = valid.map((p) => p.email).filter((email) => !byEmail.has(email))
+  for (const batch of chunks(unknown, 100)) {
+    const { data, error } = await db().from("users").select(EXISTING_COLUMNS).in("email", batch)
+    if (error) throw error
+    for (const p of (data ?? []) as Existing[]) others.set(normEmail(p.email), p)
+  }
+
+  for (const person of valid) {
+    const current = byEmail.get(person.email) ?? others.get(person.email)
+    if (!current) {
+      toCreate.push(person)
       continue
     }
-    const current = byEmail.get(person.email)
-    if (!current) toCreate.push(person)
-    else if (current.role === "superadmin") {
-      skipped.push({ email: person.email, reason: `a ${BRAND} super admin` })
+    const refusal = refusalFor(org, current)
+    if (refusal) {
+      skipped.push({ email: person.email, reason: refusal })
     } else {
       kept.add(current.id)
       toUpdate.push({ person, current })
@@ -264,8 +330,14 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
     }
     const next = roleFor(current.role, row?.role_before_grant ?? null)
     if (next.role) patch.role = next.role
+    // In this tenant without a company yet: they work for this one now.
+    if (!current.organization_id) patch.organization_id = org.id
     if (Object.keys(patch).length) {
-      const { error } = await db().from("users").update(patch).eq("id", current.id)
+      const { error } = await db()
+        .from("users")
+        .update(patch)
+        .eq("id", current.id)
+        .eq("tenant_id", org.tenant_id)
       if (error) {
         skipped.push({ email: person.email, reason: "could not be updated just now" })
         return
@@ -311,9 +383,12 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
   })
 
   if (complete) {
-    const leavers = [...managed.values()].filter(
-      (row) => !row.deactivated_at && !kept.has(row.user_id) && byId.get(row.user_id)?.role !== "superadmin"
-    )
+    // Only people still with this company here: someone the IT team has since
+    // moved to another company is no longer this connection's to switch off.
+    const leavers = [...managed.values()].filter((row) => {
+      const current = byId.get(row.user_id)
+      return !row.deactivated_at && !kept.has(row.user_id) && !!current && current.role !== "superadmin"
+    })
     await eachLimited(leavers, 6, async (row) => {
       const { error } = await db().auth.admin.updateUserById(row.user_id, { ban_duration: BANNED })
       if (error) return // tried again at the next sync
@@ -330,7 +405,7 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
   }
 
   console.log(
-    `[AskMiraa] roster for ${org.domain}: ${created} created, ${updated} updated, ${deactivated} switched off, ${skipped.length} skipped`
+    `[AskMiraa] roster for ${org.name} (${org.id}): ${created} created, ${updated} updated, ${deactivated} switched off, ${skipped.length} skipped`
   )
   return { created, updated, deactivated, skipped: skipped.slice(0, 200) }
 }

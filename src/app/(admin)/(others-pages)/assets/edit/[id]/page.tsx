@@ -17,6 +17,7 @@ export default function EditAssetPage() {
     const [data, setData] = React.useState<AssetFormState | null>(null)
     const [assignedUser, setAssignedUser] =
         React.useState<User | null>(null)
+    const [tenantId, setTenantId] = React.useState<string | null>(null)
 
     React.useEffect(() => {
         const load = async () => {
@@ -31,11 +32,15 @@ export default function EditAssetPage() {
                 .select("key, value")
                 .eq("asset_id", id)
 
-            const { data: assignment } = await supabase
+            // Assignment history is kept: the current holder is the open row
+            const { data: openAssignments } = await supabase
                 .from("asset_assignments")
                 .select("user_id")
                 .eq("asset_id", id)
-                .single()
+                .is("returned_at", null)
+                .order("assigned_at", { ascending: false })
+                .limit(1)
+            const assignment = openAssignments?.[0] ?? null
 
             let user: User | null = null
             if (assignment?.user_id) {
@@ -52,6 +57,7 @@ export default function EditAssetPage() {
             )
 
             setAssignedUser(user)
+            setTenantId(asset.tenant_id ?? null)
 
             setData({
                 organization_id: asset.organization_id ?? "",
@@ -120,6 +126,7 @@ export default function EditAssetPage() {
                     assetId={id}
                     initialData={data}
                     initialAssignedUser={assignedUser}
+                    initialTenantId={tenantId}
                 />
             </div>
         </RoleGate>

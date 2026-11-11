@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronDown, LogOut, UserCircle2 } from "lucide-react";
+import { Building, ChevronDown, LogOut, UserCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabaseClient";
@@ -53,8 +53,9 @@ export default function UserDropdown() {
             <span className="block text-sm font-semibold leading-tight text-gray-900 dark:text-white">
               {user.full_name}
             </span>
-            <span className="block text-[11px] font-medium leading-tight text-gray-500 dark:text-gray-400">
+            <span className="block max-w-[180px] truncate text-[11px] font-medium leading-tight text-gray-500 dark:text-gray-400">
               {roleLabel(user.role)}
+              {user.tenant ? ` · ${user.tenant.name}` : ""}
             </span>
           </span>
           <ChevronDown className="size-4 text-gray-400" />
@@ -75,6 +76,12 @@ export default function UserDropdown() {
             <span className="mt-1 inline-block rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-600 dark:bg-brand-500/15 dark:text-brand-300">
               {roleLabel(user.role)}
             </span>
+            {user.tenant && (
+              <p className="mt-1 flex items-center gap-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                <Building className="size-3 shrink-0" />
+                <span className="truncate">{user.tenant.name}</span>
+              </p>
+            )}
           </div>
         </DropdownMenuLabel>
 

@@ -15,17 +15,22 @@ function escapeLike(value: string) {
 
 /**
  * Every asset code the current user can see, keyed by `assetCodeKey`.
+ * Codes are unique per tenant: pass `tenantId` to check against one tenant
+ * (a super admin can read every tenant's assets). RLS already limits everyone else.
  * Pages through the table because Supabase caps a single response (1000 rows by default).
  */
-export async function fetchExistingAssetCodes(): Promise<Map<string, string>> {
+export async function fetchExistingAssetCodes(tenantId?: string | null): Promise<Map<string, string>> {
   const PAGE = 1000
   const codes = new Map<string, string>()
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("assets")
       .select("asset_code")
       .order("asset_code", { ascending: true })
+      .order("id")
       .range(from, from + PAGE - 1)
+    if (tenantId) query = query.eq("tenant_id", tenantId)
+    const { data, error } = await query
     if (error) throw error
     for (const row of data ?? []) {
       const key = assetCodeKey(row.asset_code)
@@ -36,18 +41,23 @@ export async function fetchExistingAssetCodes(): Promise<Map<string, string>> {
   return codes
 }
 
-/** Returns the asset already using `code` (case-insensitive), ignoring `excludeId`. */
-export async function findAssetByCode(code: string, excludeId?: string) {
+/**
+ * Returns the asset already using `code` (case-insensitive), ignoring `excludeId`.
+ * Pass `tenantId` to look in that tenant only (codes are unique per tenant).
+ * This is only a friendly pre-check; the API enforces uniqueness (409 "duplicate_code").
+ */
+export async function findAssetByCode(code: string, excludeId?: string, tenantId?: string | null) {
   let query = supabase
     .from("assets")
     .select("id, asset_code")
     .ilike("asset_code", escapeLike(code.trim()))
     .limit(1)
   if (excludeId) query = query.neq("id", excludeId)
+  if (tenantId) query = query.eq("tenant_id", tenantId)
   const { data, error } = await query
   if (error) throw error
   return data?.[0] ?? null
 }
 
-/** Postgres unique-violation code, returned if the database enforces unique asset codes. */
-export const UNIQUE_VIOLATION = "23505"
+/** Error code the asset API returns (with HTTP 409) when an asset code is already taken. */
+export const DUPLICATE_CODE = "duplicate_code"

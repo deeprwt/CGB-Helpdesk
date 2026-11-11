@@ -17,6 +17,11 @@
 // captured token can't be replayed with another body; `act` and `launch`
 // tokens also work only once (their `jti`).
 //
+// The helpdesk is multi-tenant: a connected organization is a client company
+// inside one tenant (`organizations.tenant_id`). Its people are the accounts
+// with `users.organization_id` = that company (and so the same tenant); email
+// domains play no part in who belongs.
+//
 // Everything here runs on the server with the service role. The tables it
 // keeps (supabase/migration_askmira.sql) have row level security on and no
 // policies, so no browser can read them.
@@ -139,10 +144,6 @@ export function normEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase()
 }
 
-export function domainOf(email: string) {
-  return email.split("@")[1]?.trim().toLowerCase() ?? ""
-}
-
 export function clean(value: unknown, max = 200): string | null {
   if (value === null || value === undefined) return null
   const text = String(value).trim().slice(0, max)
@@ -194,6 +195,8 @@ export async function allRows<T>(
 
 /* ── The connection's secret ─────────────────────────────── */
 
+// Note: without ASKMIRA_LINK_SECRET this falls back to the service role key.
+// Changing either value changes every derived secret and breaks live connections.
 function serverKey() {
   return process.env.ASKMIRA_LINK_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 }
@@ -257,7 +260,32 @@ export function verify(token: string, secret: string): Claims | null {
 
 /* ── The connection ──────────────────────────────────────── */
 
-export type Organization = { id: string; name: string; domain: string; status: string }
+/** A connected client company, inside one tenant. `domain` is informational only. */
+export type Organization = {
+  id: string
+  name: string
+  domain: string | null
+  status: string
+  tenant_id: string
+}
+
+export const ORGANIZATION_COLUMNS = "id, name, domain, status, tenant_id"
+
+export function asOrganization(row: Record<string, unknown>): Organization {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    domain: row.domain ? String(row.domain).toLowerCase() : null,
+    status: String(row.status ?? ""),
+    tenant_id: String(row.tenant_id),
+  }
+}
+
+/** Whether a tenant is active (a suspended tenant's people use nothing). */
+export async function tenantActive(tenantId: string) {
+  const { data } = await db().from("tenants").select("status").eq("id", tenantId).maybeSingle()
+  return data?.status === "active"
+}
 
 export type Link = {
   organization_id: string
@@ -282,11 +310,11 @@ export async function linkedTo(tenantId: string): Promise<Linked | null> {
   if (error || !link) return null
   const { data: org } = await db()
     .from("organizations")
-    .select("id, name, domain, status")
+    .select(ORGANIZATION_COLUMNS)
     .eq("id", link.organization_id)
     .maybeSingle()
-  if (!org) return null
-  return { link: link as Link, org: { ...org, domain: String(org.domain).toLowerCase() } }
+  if (!org || !org.tenant_id) return null
+  return { link: link as Link, org: asOrganization(org) }
 }
 
 /**
@@ -353,9 +381,11 @@ export type Person = {
   full_name: string | null
   role: string
   phone: number | string | null
+  tenant_id: string
+  organization_id: string | null
 }
 
-export const PERSON_COLUMNS = "id, email, full_name, role, phone"
+export const PERSON_COLUMNS = "id, email, full_name, role, phone, tenant_id, organization_id"
 
 export const isStaff = (p: Person) => ["engineer", "admin", "superadmin"].includes(p.role)
 export const isAdmin = (p: Person) => p.role === "admin" || p.role === "superadmin"
@@ -369,16 +399,9 @@ export async function personByEmail(email: string): Promise<Person | null> {
   return (data?.[0] as Person | undefined) ?? null
 }
 
-/** Whether a person belongs to the organization: its email domain, or access given here. */
-export async function belongsTo(person: Person, org: Organization) {
-  if (domainOf(person.email) === org.domain) return true
-  const { data } = await db()
-    .from("user_organization_access")
-    .select("id")
-    .eq("user_id", person.id)
-    .eq("organization_id", org.id)
-    .limit(1)
-  return Boolean(data?.length)
+/** Whether a person belongs to the organization: they work for that company (in its tenant). */
+export function belongsTo(person: Pick<Person, "tenant_id" | "organization_id">, org: Organization) {
+  return person.organization_id === org.id && person.tenant_id === org.tenant_id
 }
 
 /** The person AskMiraa is asking for, if they may use the helpdesk for this company. */
@@ -390,11 +413,11 @@ export async function actorIn(org: Organization, actor: unknown): Promise<Person
     `You don't have a ${BRAND} account for ${org.name} yet. Open ${BRAND} once from AskMiraa, then try again.`
   )
   if (!EMAIL_RE.test(email) || !["admin", "user"].includes(String(given.role ?? ""))) throw refusal
-  if (org.status !== "active") {
+  if (org.status !== "active" || !(await tenantActive(org.tenant_id))) {
     throw httpError(403, `${org.name} is switched off in ${BRAND}. Ask your IT team.`)
   }
   const me = await personByEmail(email)
-  if (!me || !(await belongsTo(me, org))) throw refusal
+  if (!me || !belongsTo(me, org)) throw refusal
   const { data: managed } = await db()
     .from("askmira_people")
     .select("deactivated_at")

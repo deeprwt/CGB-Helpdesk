@@ -1,5 +1,5 @@
 import { NextResponse, after } from "next/server"
-import { getRequestUser, jsonError, loadPerson, serviceClient } from "@/lib/ticket-server"
+import { jsonError, requireActor } from "@/lib/ticket-server"
 import { ticketPermissions } from "@/lib/ticket-access"
 import { sendTicketEmail } from "@/lib/email"
 
@@ -16,8 +16,9 @@ export const runtime = "nodejs"
  */
 export async function POST(req: Request) {
   try {
-    const authUser = await getRequestUser(req)
-    if (!authUser) return jsonError("Unauthorized", 401)
+    const ctx = await requireActor(req)
+    if (ctx instanceof Response) return ctx
+    const { db, me } = ctx
 
     const body = await req.json().catch(() => ({}))
     const ticketId: string | undefined = body.ticket_id
@@ -29,14 +30,10 @@ export async function POST(req: Request) {
     if (!ticketId) return jsonError("Missing ticket_id", 400)
     if (!text) return jsonError("Write a message first", 400)
 
-    const db = serviceClient()
-    const me = await loadPerson(db, authUser.id)
-    if (!me) return jsonError("Unauthorized", 401)
-
     // Fresh read: the assignee may have changed since the sender opened the page
     const { data: ticket } = await db
       .from("tickets")
-      .select("id, subject, requester_id, assignee, status")
+      .select("id, tenant_id, subject, requester_id, assignee, status")
       .eq("id", ticketId)
       .maybeSingle()
     if (!ticket) return jsonError("Ticket not found", 404)
@@ -54,6 +51,7 @@ export async function POST(req: Request) {
     const { data: message, error } = await db
       .from("ticket_messages")
       .insert({
+        tenant_id: ticket.tenant_id,
         ticket_id: ticket.id,
         sender_id: me.id,
         sender_role: can.isRequester ? "user" : "engineer",
@@ -70,6 +68,7 @@ export async function POST(req: Request) {
       after(async () => {
         try {
           await db.from("notifications").insert({
+            tenant_id: ticket.tenant_id,
             user_id: recipientId,
             actor_id: me.id,
             ticket_id: ticket.id,

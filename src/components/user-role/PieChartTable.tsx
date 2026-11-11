@@ -4,7 +4,6 @@ import * as React from "react"
 import { Label, Pie, PieChart } from "recharts"
 import { ChartPie } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
-import { getStaffWorkDomains, getOrgUserIdsByDomains } from "@/lib/org"
 
 import {
   Card,
@@ -128,23 +127,8 @@ export function PieChartTable() {
 
       const fromDate = getFromDate(range)
 
-      // Scope aggregate counts to user's accessible org(s)
-      const domains = await getStaffWorkDomains(supabase, user.id, user.email ?? "", profile.role)
-      const orgUserIds = await getOrgUserIdsByDomains(supabase, domains)
-
-      if (orgUserIds.length === 0) {
-        setData([
-          { key: "total", label: "Total Tickets", value: 0, fill: COLORS.total },
-          { key: "new", label: "New Tickets (Queue)", value: 0, fill: COLORS.new },
-          { key: "open", label: "Open Tickets", value: 0, fill: COLORS.open },
-          { key: "hold", label: "Hold Tickets", value: 0, fill: COLORS.hold },
-          { key: "closed", label: "Closed Tickets", value: 0, fill: COLORS.closed },
-        ])
-        setLoading(false)
-        setReady(true)
-        return
-      }
-
+      // The database (RLS) scopes these counts to this person's tenant
+      // (every tenant for a super admin).
       const [
         total,
         newQueue,
@@ -155,13 +139,11 @@ export function PieChartTable() {
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
-          .in("requester_id", orgUserIds)
           .gte("created_at", fromDate),
 
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
-          .in("requester_id", orgUserIds)
           .is("assignee", null)
           .eq("status", "new")
           .gte("created_at", fromDate),
