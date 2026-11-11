@@ -139,7 +139,7 @@ export default function EngineerTicketTable() {
 
         // The requester filter goes in the request URL, so it is sent in batches
         // of IDs. Each batch returns its newest offset+pageSize rows; merged and
-        // sorted, that gives the exact page (as AskMira's ticket lists do).
+        // sorted, that gives the exact page (as AskMiraa's ticket lists do).
         const want = showAll ? MAX_ROWS : Math.min(offset + pageSize, MAX_ROWS)
         const parts = await Promise.all(
           chunkList(orgUserIds, ID_CHUNK).map((batch) =>

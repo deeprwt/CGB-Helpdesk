@@ -49,11 +49,11 @@ type ChartRow = {
 
 /* Same tones as the dashboard stat cards (indigo / sky / amber / rose / emerald) */
 const COLORS = {
-  total: "#6366f1",
-  new: "#0ea5e9",
-  open: "#f59e0b",
-  hold: "#f43f5e",
-  closed: "#10b981",
+  total: "#7d0712",
+  new: "#f8a01a",
+  open: "#2d6a8a",
+  hold: "#c4908c",
+  closed: "#2e7d5b",
 }
 
 const RANGE_DESCRIPTION: Record<Range, string> = {

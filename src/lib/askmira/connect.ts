@@ -1,16 +1,16 @@
-// Connecting an organization to an AskMira workspace, like "Sign in with…".
+// Connecting an organization to an AskMiraa workspace, like "Sign in with…".
 //
-// 1. An admin of the workspace in AskMira presses Connect there and lands on
-//    /connect/askmira here with AskMira's workspace, where to come back to, a
+// 1. An admin of the workspace in AskMiraa presses Connect there and lands on
+//    /connect/askmira here with AskMiraa's workspace, where to come back to, a
 //    state and a PKCE challenge.
 // 2. An admin here (or a super admin) signs in, picks the organization and
 //    presses Allow (`approve`): a one-time code, bound to that organization and
-//    to the challenge, goes back to AskMira in the browser.
-// 3. AskMira's server swaps the code and the verifier — which only it holds —
+//    to the challenge, goes back to AskMiraa in the browser.
+// 3. AskMiraa's server swaps the code and the verifier — which only it holds —
 //    for the organization's own secret (`swap`).
 //
 // The secret reaches that one organization only. Either side can disconnect:
-// AskMira from its Connectors (`revoke`), an admin here from the AskMira page
+// AskMiraa from its Connectors (`revoke`), an admin here from the AskMiraa page
 // (`disconnect`).
 
 import crypto from "crypto"
@@ -49,7 +49,7 @@ export async function signedIn(req: Request): Promise<Person> {
 
 function requireAdmin(me: Person) {
   if (me.role !== "admin" && me.role !== "superadmin") {
-    throw httpError(403, `Only a ${BRAND} admin connects a company to AskMira.`)
+    throw httpError(403, `Only a ${BRAND} admin connects a company to AskMiraa.`)
   }
 }
 
@@ -74,13 +74,13 @@ async function organizationFor(me: Person, organizationId: unknown) {
   return org
 }
 
-/** The AskMira that is asking, from where it wants the answer sent; refuses anything odd. */
+/** The AskMiraa that is asking, from where it wants the answer sent; refuses anything odd. */
 function askmiraOrigin(redirectUri: unknown) {
   let url: URL
   try {
     url = new URL(String(redirectUri ?? ""))
   } catch {
-    throw httpError(422, "That is not an AskMira connect link.")
+    throw httpError(422, "That is not an AskMiraa connect link.")
   }
   const local = ["localhost", "127.0.0.1"].includes(url.hostname)
   if (
@@ -92,19 +92,19 @@ function askmiraOrigin(redirectUri: unknown) {
     url.username ||
     url.password
   ) {
-    throw httpError(422, "That is not an AskMira connect link.")
+    throw httpError(422, "That is not an AskMiraa connect link.")
   }
   const allowed = String(process.env.ASKMIRA_ALLOWED_ORIGINS ?? "")
     .split(",")
     .map((o) => o.trim().replace(/\/+$/, ""))
     .filter(Boolean)
   if (allowed.length && !allowed.includes(url.origin)) {
-    throw httpError(403, "This AskMira is not one this helpdesk connects to.")
+    throw httpError(403, "This AskMiraa is not one this helpdesk connects to.")
   }
   return url
 }
 
-/** The admin's companies, and the AskMira workspace each is connected to. */
+/** The admin's companies, and the AskMiraa workspace each is connected to. */
 export async function connections(me: Person) {
   requireAdmin(me)
   const orgs = await organizationsOf(me)
@@ -138,7 +138,7 @@ export async function connections(me: Person) {
   }
 }
 
-/** Allow: a one-time code for AskMira, bound to the organization the admin chose. */
+/** Allow: a one-time code for AskMiraa, bound to the organization the admin chose. */
 export async function approve(me: Person, body: Record<string, unknown>) {
   requireAdmin(me)
   if (!canConnect()) {
@@ -149,7 +149,7 @@ export async function approve(me: Person, body: Record<string, unknown>) {
   const state = String(body.state ?? "")
   const name = clean(body.tenant_name)
   if (!UUID_RE.test(tenantId) || !PKCE_RE.test(challenge) || !state || state.length > 4000 || !name) {
-    throw httpError(422, "That is not an AskMira connect link.")
+    throw httpError(422, "That is not an AskMiraa connect link.")
   }
   const callback = askmiraOrigin(body.redirect_uri)
   const org = await organizationFor(me, body.organization_id)
@@ -161,10 +161,10 @@ export async function approve(me: Person, body: Record<string, unknown>) {
   // Missing tables included: `respond` turns that into SETUP_MESSAGE.
   if (linksError) throw linksError
   if ((links ?? []).some((l) => l.organization_id === org.id && l.askmira_tenant_id !== tenantId)) {
-    throw httpError(409, `${org.name} is already connected to another AskMira workspace. Disconnect it first.`)
+    throw httpError(409, `${org.name} is already connected to another AskMiraa workspace. Disconnect it first.`)
   }
   if ((links ?? []).some((l) => l.askmira_tenant_id === tenantId && l.organization_id !== org.id)) {
-    throw httpError(409, "That AskMira workspace is already connected to another company here.")
+    throw httpError(409, "That AskMiraa workspace is already connected to another company here.")
   }
 
   const code = crypto.randomBytes(32).toString("base64url")
@@ -180,12 +180,12 @@ export async function approve(me: Person, body: Record<string, unknown>) {
     expires_at: new Date(Date.now() + CODE_LIFETIME_MS).toISOString(),
   })
   if (error) throw error
-  console.log(`[AskMira] ${org.domain} approved a connection to workspace ${tenantId} at ${callback.origin}`)
+  console.log(`[AskMiraa] ${org.domain} approved a connection to workspace ${tenantId} at ${callback.origin}`)
   const query = new URLSearchParams({ code, state, product: PRODUCT })
   return { redirect_to: `${callback.origin}${CALLBACK_PATH}?${query}` }
 }
 
-/** AskMira's server swaps the code, and the verifier only it holds, for the secret. */
+/** AskMiraa's server swaps the code, and the verifier only it holds, for the secret. */
 export async function swap(body: Record<string, unknown>) {
   const code = String(body.code ?? "")
   const verifier = String(body.verifier ?? "")
@@ -225,7 +225,7 @@ export async function swap(body: Record<string, unknown>) {
     .or(`organization_id.eq.${org.id},askmira_tenant_id.eq.${tenantId}`)
   if (clashError) throw clashError
   if ((clash ?? []).some((l) => (l.organization_id === org.id) !== (l.askmira_tenant_id === tenantId))) {
-    throw httpError(409, "That AskMira workspace or this company is already connected elsewhere.")
+    throw httpError(409, "That AskMiraa workspace or this company is already connected elsewhere.")
   }
   const nonce = crypto.randomBytes(32).toString("base64url")
   const { error } = await db().from("askmira_links").upsert(
@@ -241,7 +241,7 @@ export async function swap(body: Record<string, unknown>) {
     { onConflict: "organization_id" }
   )
   if (error) throw error
-  console.log(`[AskMira] organization ${org.id} connected to workspace ${tenantId}`)
+  console.log(`[AskMiraa] organization ${org.id} connected to workspace ${tenantId}`)
   return {
     product: PRODUCT,
     brand: BRAND,
@@ -251,18 +251,18 @@ export async function swap(body: Record<string, unknown>) {
   }
 }
 
-/** AskMira disconnected: forget this workspace's secret here too. */
+/** AskMiraa disconnected: forget this workspace's secret here too. */
 export async function revoke(tenantId: string) {
   await db().from("askmira_links").delete().eq("askmira_tenant_id", tenantId.toLowerCase())
-  console.log(`[AskMira] workspace ${tenantId} disconnected from AskMira`)
+  console.log(`[AskMiraa] workspace ${tenantId} disconnected from AskMiraa`)
   return { disconnected: true }
 }
 
-/** Disconnect from this side: AskMira's secret for this company stops working at once. */
+/** Disconnect from this side: AskMiraa's secret for this company stops working at once. */
 export async function disconnect(me: Person, organizationId: unknown) {
   requireAdmin(me)
   const org = await organizationFor(me, organizationId)
   await db().from("askmira_links").delete().eq("organization_id", org.id)
-  console.log(`[AskMira] ${org.domain} disconnected by ${me.email}`)
+  console.log(`[AskMiraa] ${org.domain} disconnected by ${me.email}`)
   return connections(me)
 }

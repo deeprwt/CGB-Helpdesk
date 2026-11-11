@@ -10,7 +10,7 @@ const PUBLIC_ROUTES = [
   "/reset-password",
   "/update-password",
   "/verify-email",
-  // AskMira: Allow asks for sign-in itself; the sign-in link from AskMira makes the session.
+  // AskMiraa: Allow asks for sign-in itself; the sign-in link from AskMiraa makes the session.
   "/connect/askmira",
   "/sso/askmira",
 ]

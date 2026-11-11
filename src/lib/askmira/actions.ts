@@ -1,4 +1,4 @@
-// What a person does here from AskMira, as themselves.
+// What a person does here from AskMiraa, as themselves.
 //
 //   POST /api/integrations/askmira/act   use=act, `bh` = SHA-256 of the body; each token once
 //   { tenant_id, actor: { id, email, role }, kind, params }
@@ -8,7 +8,7 @@
 //
 // Each does what the helpdesk's own screens do — the same rows, the same
 // activity entry, the same in-app notifications and emails — so a ticket
-// raised from AskMira is worked here like any other. Who is notified is
+// raised from AskMiraa is worked here like any other. Who is notified is
 // decided in lib/ticket-notify.ts, as for the helpdesk.
 
 import { sendTicketEmail } from "@/lib/email"
@@ -123,7 +123,7 @@ async function createTicket(ctx: Ctx) {
     })
   )
 
-  console.log(`[AskMira] ticket #${ref} raised for ${org.domain} by ${me.email}`)
+  console.log(`[AskMiraa] ticket #${ref} raised for ${org.domain} by ${me.email}`)
   return { ticket: { id: ticket.id, ref, subject, status: ticket.status, created_at: ticket.created_at } }
 }
 

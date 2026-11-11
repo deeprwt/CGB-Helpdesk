@@ -1,6 +1,6 @@
 /* -----------------------------------
    Category → Sub Category Map (FULL)
-   Shared by the New Ticket form and the AskMira connection, which offers
+   Shared by the New Ticket form and the AskMiraa connection, which offers
    the same choices when someone raises a ticket from the HRMS.
 ----------------------------------- */
 export const CATEGORY_MAP: Record<string, string[]> = {

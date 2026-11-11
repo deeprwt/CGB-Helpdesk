@@ -1,16 +1,16 @@
-// The link with AskMira, the HRMS a company may run its people in.
+// The link with AskMiraa, the HRMS a company may run its people in.
 //
-// An admin of a workspace in AskMira presses Connect there, lands on
+// An admin of a workspace in AskMiraa presses Connect there, lands on
 // /connect/askmira here, signs in and presses Allow for one organization
-// (connect.ts). From then on AskMira's server calls here for that one
+// (connect.ts). From then on AskMiraa's server calls here for that one
 // organization only, each call carrying a short-lived HS256 token signed with
 // the secret this connection was given (aud "askmira:helpdesk", iss "askmira"):
 //
 //   POST /api/integrations/askmira/users/sync      use=provision  the company's people (people.ts)
 //   POST /api/integrations/askmira/query           use=query      read for one person (queries.ts)
 //   POST /api/integrations/askmira/act             use=act        raise a ticket, reply (actions.ts)
-//   POST /api/integrations/askmira/connect/token   AskMira swaps the one-time code (PKCE)
-//   POST /api/integrations/askmira/connect/revoke  use=revoke     AskMira disconnected
+//   POST /api/integrations/askmira/connect/token   AskMiraa swaps the one-time code (PKCE)
+//   POST /api/integrations/askmira/connect/revoke  use=revoke     AskMiraa disconnected
 //   POST /api/integrations/askmira/launch          use=launch     sign a person in (launch.ts)
 //
 // Server-to-server tokens carry `bh`, the SHA-256 of the exact body, so a
@@ -44,9 +44,9 @@ export class HttpError extends Error {
 
 export const httpError = (status: number, message: string) => new HttpError(status, message)
 
-/** What every AskMira endpoint says while its tables are missing from the database. */
+/** What every AskMiraa endpoint says while its tables are missing from the database. */
 export const SETUP_MESSAGE =
-  "This helpdesk is not set up for AskMira yet: its database does not have the AskMira tables. " +
+  "This helpdesk is not set up for AskMiraa yet: its database does not have the AskMiraa tables. " +
   "Whoever runs the helpdesk needs to run supabase/migration_askmira.sql once in the Supabase " +
   "SQL Editor; then try again."
 
@@ -96,7 +96,7 @@ export function defer(task: () => Promise<unknown>) {
     try {
       await task()
     } catch (err) {
-      console.error("[AskMira] follow-up failed:", err)
+      console.error("[AskMiraa] follow-up failed:", err)
     }
   })
 }
@@ -116,10 +116,10 @@ export async function respond(work: () => Promise<unknown>) {
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
     if (isMissingTable(err)) {
-      console.error("[AskMira] the AskMira tables are missing:", err)
+      console.error("[AskMiraa] the AskMiraa tables are missing:", err)
       return NextResponse.json({ error: SETUP_MESSAGE }, { status: 503 })
     }
-    console.error("[AskMira] request failed:", err)
+    console.error("[AskMiraa] request failed:", err)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -202,7 +202,7 @@ export function canConnect() {
   return serverKey().length >= 32
 }
 
-/** An organization's AskMira secret: derived here, so the database keeps only the nonce. */
+/** An organization's AskMiraa secret: derived here, so the database keeps only the nonce. */
 export function derive(organizationId: string, nonce: string) {
   return crypto
     .createHmac("sha256", serverKey())
@@ -270,7 +270,7 @@ export type Link = {
 
 export type Linked = { link: Link; org: Organization }
 
-/** The organization connected to an AskMira workspace, or null. */
+/** The organization connected to an AskMiraa workspace, or null. */
 export async function linkedTo(tenantId: string): Promise<Linked | null> {
   if (!UUID_RE.test(tenantId)) return null
   const { data: link, error } = await db()
@@ -301,12 +301,12 @@ export async function claimsOf(token: string, use: Use): Promise<Linked & { clai
   const found = canConnect() ? await linkedTo(tenantId) : null
   if (!found) throw httpError(404, "Not found")
   const claims = verify(token, derive(found.link.organization_id, found.link.secret_nonce))
-  if (!claims) throw httpError(401, "This AskMira link is not valid or has expired.")
-  if (claims.use !== use) throw httpError(401, "This AskMira link is not valid here.")
+  if (!claims) throw httpError(401, "This AskMiraa link is not valid or has expired.")
+  if (claims.use !== use) throw httpError(401, "This AskMiraa link is not valid here.")
   return { ...found, claims }
 }
 
-/** AskMira's server-to-server call: the token, bound to this exact body and workspace. */
+/** AskMiraa's server-to-server call: the token, bound to this exact body and workspace. */
 export async function assertion(req: Request, use: Exclude<Use, "launch">) {
   const raw = Buffer.from(await req.arrayBuffer())
   let body: Record<string, unknown>
@@ -319,7 +319,7 @@ export async function assertion(req: Request, use: Exclude<Use, "launch">) {
     throw httpError(400, "The request is not a JSON object.")
   }
   const match = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")
-  if (!match) throw httpError(401, "Missing AskMira assertion.")
+  if (!match) throw httpError(401, "Missing AskMiraa assertion.")
   const found = await claimsOf(match[1].trim(), use)
   if (!safeEqual(String(found.claims.bh ?? ""), sha256hex(raw))) {
     throw httpError(401, "The assertion does not match this request.")
@@ -381,13 +381,13 @@ export async function belongsTo(person: Person, org: Organization) {
   return Boolean(data?.length)
 }
 
-/** The person AskMira is asking for, if they may use the helpdesk for this company. */
+/** The person AskMiraa is asking for, if they may use the helpdesk for this company. */
 export async function actorIn(org: Organization, actor: unknown): Promise<Person> {
   const given = actor && typeof actor === "object" ? (actor as Record<string, unknown>) : {}
   const email = normEmail(given.email)
   const refusal = httpError(
     403,
-    `You don't have a ${BRAND} account for ${org.name} yet. Open ${BRAND} once from AskMira, then try again.`
+    `You don't have a ${BRAND} account for ${org.name} yet. Open ${BRAND} once from AskMiraa, then try again.`
   )
   if (!EMAIL_RE.test(email) || !["admin", "user"].includes(String(given.role ?? ""))) throw refusal
   if (org.status !== "active") {

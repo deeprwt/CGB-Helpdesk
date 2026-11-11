@@ -1,18 +1,18 @@
-// The company's people, as AskMira sends them.
+// The company's people, as AskMiraa sends them.
 //
-// AskMira is where the company keeps its people, so it decides who may use
+// AskMiraa is where the company keeps its people, so it decides who may use
 // the helpdesk for a connected organization: it sends the whole roster when
 // it connects, every night, and whenever its admin presses Sync. Here:
 //
-// * Someone new gets an account (no password: they come in from AskMira).
-// * Their name, employee code, department and designation follow AskMira.
-// * Roles here are this helpdesk's own: AskMira never makes anyone an engineer
+// * Someone new gets an account (no password: they come in from AskMiraa).
+// * Their name, employee code, department and designation follow AskMiraa.
+// * Roles here are this helpdesk's own: AskMiraa never makes anyone an engineer
 //   or an admin, because those roles reach every organization the helpdesk
 //   serves (every client's assets, for one). Someone new starts as a user;
-//   HR's view of their own company in AskMira needs no role here (queries.ts).
+//   HR's view of their own company in AskMiraa needs no role here (queries.ts).
 //   Anyone an earlier version of this connection made an admin, for being HR
-//   in AskMira, gets back the role they had before.
-// * Someone AskMira manages who drops out of the roster (they left) can't
+//   in AskMiraa, gets back the role they had before.
+// * Someone AskMiraa manages who drops out of the roster (they left) can't
 //   sign in any more. People added here directly are never touched, and
 //   neither is a super admin.
 
@@ -31,7 +31,7 @@ import {
   type Person,
 } from "./core"
 
-/** How long "switched off" lasts: in effect, until AskMira lets them back in. */
+/** How long "switched off" lasts: in effect, until AskMiraa lets them back in. */
 const BANNED = "876000h"
 
 type Incoming = {
@@ -92,7 +92,7 @@ export function roleFor(current: string, before: string | null): { role: string 
   return { role: null, before: null }
 }
 
-/** A new account for someone AskMira sent: no password, they arrive from AskMira. */
+/** A new account for someone AskMiraa sent: no password, they arrive from AskMiraa. */
 export async function createPerson(
   org: Organization,
   person: Pick<Incoming, "id" | "email" | "name" | "role"> & Partial<Incoming>
@@ -110,7 +110,7 @@ export async function createPerson(
   const id = data.user.id
   // Everyone starts as a user: the IT team makes engineers and admins here.
   const role = "user"
-  // The sign-up trigger usually makes this row already; fill in what AskMira knows.
+  // The sign-up trigger usually makes this row already; fill in what AskMiraa knows.
   const profile: Record<string, unknown> = { id, email: person.email, full_name: name, role }
   if (person.employee_code) profile.employee_id = person.employee_code
   if (person.department) profile.department = person.department
@@ -138,7 +138,7 @@ export async function createPerson(
   return { id, email: person.email, full_name: name, role, phone: null }
 }
 
-/** One person's managed row, if AskMira manages them in this organization. */
+/** One person's managed row, if AskMiraa manages them in this organization. */
 export async function managedRow(org: Organization, userId: string): Promise<Managed | null> {
   const { data } = await db()
     .from("askmira_people")
@@ -150,9 +150,9 @@ export async function managedRow(org: Organization, userId: string): Promise<Man
 }
 
 /**
- * Brings an existing account in step with AskMira: AskMira manages it from now
+ * Brings an existing account in step with AskMiraa: AskMiraa manages it from now
  * on (and any admin role an earlier version granted goes back). Used when
- * someone signs in from AskMira.
+ * someone signs in from AskMiraa.
  */
 export async function adopt(
   org: Organization,
@@ -180,7 +180,7 @@ export async function adopt(
   return next.role ? { ...person, role: next.role } : person
 }
 
-/** The full roster from AskMira: add, update and switch off to match it. */
+/** The full roster from AskMiraa: add, update and switch off to match it. */
 export async function syncPeople(org: Organization, body: Record<string, unknown>) {
   const people = Array.isArray(body.users) ? body.users : []
   const complete = body.complete !== false
@@ -330,7 +330,7 @@ export async function syncPeople(org: Organization, body: Record<string, unknown
   }
 
   console.log(
-    `[AskMira] roster for ${org.domain}: ${created} created, ${updated} updated, ${deactivated} switched off, ${skipped.length} skipped`
+    `[AskMiraa] roster for ${org.domain}: ${created} created, ${updated} updated, ${deactivated} switched off, ${skipped.length} skipped`
   )
   return { created, updated, deactivated, skipped: skipped.slice(0, 200) }
 }

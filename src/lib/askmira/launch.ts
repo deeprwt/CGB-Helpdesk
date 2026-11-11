@@ -1,6 +1,6 @@
-// Signing someone in who opened the helpdesk from AskMira.
+// Signing someone in who opened the helpdesk from AskMiraa.
 //
-// AskMira sends the browser to /sso/askmira#token=… (the fragment never
+// AskMiraa sends the browser to /sso/askmira#token=… (the fragment never
 // reaches a server log). That page posts the token here; if it is good —
 // signed with the company's connection secret, not used before, naming
 // someone who may use the helpdesk for that company — we answer with a
@@ -37,7 +37,7 @@ export async function launch(token: string) {
     throw err
   }
   const { claims, org } = found
-  await spendOnce(claims, "This sign-in link was already used. Open the helpdesk again from AskMira.")
+  await spendOnce(claims, "This sign-in link was already used. Open the helpdesk again from AskMiraa.")
   if (claims.ext && String(claims.ext) !== org.id) {
     throw httpError(403, `Your company is not connected to ${BRAND} any more. Ask your HR admin.`)
   }
@@ -47,7 +47,7 @@ export async function launch(token: string) {
   const email = normEmail(claims.email)
   const role = String(claims.role ?? "")
   if (!EMAIL_RE.test(email) || (role !== "admin" && role !== "user")) {
-    throw httpError(403, `AskMira did not give you access to ${BRAND}.`)
+    throw httpError(403, `AskMiraa did not give you access to ${BRAND}.`)
   }
   const askmiraUserId = clean(claims.sub, 64)
 
@@ -77,9 +77,9 @@ export async function launch(token: string) {
   const { data, error } = await db().auth.admin.generateLink({ type: "magiclink", email: person.email })
   const hashed = data?.properties?.hashed_token
   if (error || !hashed) {
-    console.error("[AskMira] sign-in link failed:", error)
+    console.error("[AskMiraa] sign-in link failed:", error)
     throw httpError(502, `${BRAND} could not sign you in just now. Try again in a minute.`)
   }
-  console.log(`[AskMira] ${person.email} signed in from AskMira (${org.domain})`)
+  console.log(`[AskMiraa] ${person.email} signed in from AskMiraa (${org.domain})`)
   return { token_hash: hashed, type: data.properties.verification_type || "magiclink" }
 }

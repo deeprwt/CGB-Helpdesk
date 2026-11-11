@@ -1,4 +1,4 @@
-// What AskMira reads for one person: their tickets, the queues they work, the
+// What AskMiraa reads for one person: their tickets, the queues they work, the
 // assets. Read-only.
 //
 //   POST /api/integrations/askmira/query   use=query, `bh` = SHA-256 of the body
@@ -12,7 +12,7 @@
 //   of the organizations they look after (lib/org.ts getStaffWorkDomains:
 //   every organization for a super admin; for anyone else their own company
 //   plus those granted under Access Control).
-// * HR in AskMira (actor role "admin") who are not on the IT team read their
+// * HR in AskMiraa (actor role "admin") who are not on the IT team read their
 //   own company — the connected organization — and nothing else.
 // * Everyone else: their own tickets and the assets they hold.
 //
@@ -56,7 +56,7 @@ const ID_CHUNK = 150
 const MAX_ROWS = 1000
 
 type Params = Record<string, unknown>
-/** Who is asking: their account here, and whether AskMira says they are HR. */
+/** Who is asking: their account here, and whether AskMiraa says they are HR. */
 export type Ctx = { org: Organization; me: Person; params: Params; hr: boolean }
 
 type TicketRow = {
@@ -301,7 +301,7 @@ export const mayWrite = (me: Person, ticket: { requester_id: string; assignee?: 
 
 export async function openTicket(ctx: Ctx, id: unknown) {
   const ticketId = String(id ?? "")
-  // 403, not 404: AskMira reads a 404 as "this company is not connected any more".
+  // 403, not 404: AskMiraa reads a 404 as "this company is not connected any more".
   const missing = httpError(403, `There is no such ticket in ${BRAND} for you.`)
   if (!UUID_RE.test(ticketId)) throw missing
   const { data: ticket } = await db().from("tickets").select("*").eq("id", ticketId).maybeSingle()

@@ -48,13 +48,13 @@ type Stage =
   | { kind: "unready"; message: string }
   | { kind: "ready"; organizations: Organization[] }
 
-/** What AskMira will be able to do once allowed. */
+/** What AskMiraa will be able to do once allowed. */
 const GRANTS = [
   "Send your company's people across: an account for each joiner, switched off when they leave.",
-  "Open the helpdesk for your people from AskMira, without a second password.",
-  "Show each person their tickets and assets in AskMira, and let them raise tickets and reply.",
+  "Open the helpdesk for your people from AskMiraa, without a second password.",
+  "Show each person their tickets and assets in AskMiraa, and let them raise tickets and reply.",
   "Show your HR your company's tickets and assets, and your IT team what the helpdesk shows them.",
-  "AskMira never changes anyone's role here: your IT team decides who are engineers and admins.",
+  "AskMiraa never changes anyone's role here: your IT team decides who are engineers and admins.",
 ]
 
 function readRequest(): Request | null {
@@ -83,8 +83,8 @@ async function token() {
 }
 
 /**
- * /connect/askmira — an AskMira workspace asks to connect. A helpdesk admin
- * signs in, picks which of their companies it is, and presses Allow; AskMira
+ * /connect/askmira — an AskMiraa workspace asks to connect. A helpdesk admin
+ * signs in, picks which of their companies it is, and presses Allow; AskMiraa
  * then gets a key that reaches that one company only.
  */
 export default function ConnectAskMira() {
@@ -111,12 +111,12 @@ export default function ConnectAskMira() {
       if (!data.can_connect) {
         return setStage({
           kind: "refused",
-          message: "This helpdesk is not set up to connect to AskMira yet. Ask the person who runs it.",
+          message: "This helpdesk is not set up to connect to AskMiraa yet. Ask the person who runs it.",
         })
       }
       if (data.ready === false) {
-        // Its database lacks the AskMira tables: nothing an admin here can fix by signing in again.
-        return setStage({ kind: "unready", message: data.problem ?? "This helpdesk is not set up for AskMira yet." })
+        // Its database lacks the AskMiraa tables: nothing an admin here can fix by signing in again.
+        return setStage({ kind: "unready", message: data.problem ?? "This helpdesk is not set up for AskMiraa yet." })
       }
       const organizations: Organization[] = data.organizations ?? []
       if (!organizations.length) {
@@ -187,16 +187,16 @@ export default function ConnectAskMira() {
             <Link2 className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Connect AskMira
+            Connect AskMiraa
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {request ? (
               <>
-                The AskMira workspace <span className="font-medium text-gray-800 dark:text-gray-200">{request.tenant_name}</span>{" "}
+                The AskMiraa workspace <span className="font-medium text-gray-800 dark:text-gray-200">{request.tenant_name}</span>{" "}
                 wants to connect to the helpdesk.
               </>
             ) : (
-              "An AskMira workspace wants to connect to the helpdesk."
+              "An AskMiraa workspace wants to connect to the helpdesk."
             )}
           </p>
           {askmira ? (
@@ -210,7 +210,7 @@ export default function ConnectAskMira() {
           </div>
         ) : stage.kind === "broken" ? (
           <Notice>
-            This link is not complete. Go back to AskMira (Settings → Connectors) and press Connect again.
+            This link is not complete. Go back to AskMiraa (Settings → Connectors) and press Connect again.
           </Notice>
         ) : stage.kind === "signin" ? (
           <div className="flex flex-col gap-4">
@@ -268,14 +268,14 @@ export default function ConnectAskMira() {
 
             {elsewhere ? (
               <Notice>
-                {chosen?.name} is connected to the AskMira workspace “{chosen?.askmira_workspace}”. Disconnect it
-                on the helpdesk&apos;s AskMira page first.
+                {chosen?.name} is connected to the AskMiraa workspace “{chosen?.askmira_workspace}”. Disconnect it
+                on the helpdesk&apos;s AskMiraa page first.
               </Notice>
             ) : null}
 
             <div className="rounded-xl border border-gray-200 p-4 dark:border-white/10">
               <p className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-                <ShieldCheck className="size-4 text-brand-500" /> AskMira will be able to
+                <ShieldCheck className="size-4 text-brand-500" /> AskMiraa will be able to
               </p>
               <ul className="flex flex-col gap-2">
                 {GRANTS.map((grant) => (
@@ -286,7 +286,7 @@ export default function ConnectAskMira() {
                 ))}
               </ul>
               <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-                Only for the company you choose. Disconnect at any time, here or in AskMira.
+                Only for the company you choose. Disconnect at any time, here or in AskMiraa.
               </p>
             </div>
 

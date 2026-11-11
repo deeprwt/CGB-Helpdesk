@@ -1,4 +1,4 @@
-// The AskMira endpoints, one function per route (src/app/api/integrations/askmira/…).
+// The AskMiraa endpoints, one function per route (src/app/api/integrations/askmira/…).
 // Kept here so they can be exercised without a running server.
 
 import { ACTIONS } from "./actions"
@@ -8,7 +8,7 @@ import { launch as signIn } from "./launch"
 import { syncPeople } from "./people"
 import { QUERIES } from "./queries"
 
-/** Whether AskMira says the person is HR (core.actorIn has checked the role is admin or user). */
+/** Whether AskMiraa says the person is HR (core.actorIn has checked the role is admin or user). */
 function hrOf(body: Record<string, unknown>) {
   const actor = body.actor
   return Boolean(actor && typeof actor === "object" && (actor as { role?: unknown }).role === "admin")
@@ -60,10 +60,10 @@ export const actRoute = (req: Request) =>
     return { kind, ...(await action({ org, me, params: paramsOf(body), hr: hrOf(body) })) }
   })
 
-/** POST connect/token — AskMira's server swaps the one-time code (no token yet: PKCE). */
+/** POST connect/token — AskMiraa's server swaps the one-time code (no token yet: PKCE). */
 export const tokenRoute = (req: Request) => respond(async () => swap(await jsonOf(req)))
 
-/** POST connect/revoke — AskMira disconnected (use=revoke). */
+/** POST connect/revoke — AskMiraa disconnected (use=revoke). */
 export const revokeRoute = (req: Request) =>
   respond(async () => {
     const { claims } = await assertion(req, "revoke")
@@ -84,10 +84,10 @@ export const disconnectRoute = (req: Request) =>
     return disconnect(await signedIn(req), id)
   })
 
-/** POST launch — the sign-in page hands over AskMira's link (use=launch, once). */
+/** POST launch — the sign-in page hands over AskMiraa's link (use=launch, once). */
 export const launchRoute = (req: Request) =>
   respond(async () => {
     const token = String((await jsonOf(req)).token ?? "")
-    if (!token || token.length > 4000) throw httpError(401, "This AskMira link is not valid.")
+    if (!token || token.length > 4000) throw httpError(401, "This AskMiraa link is not valid.")
     return signIn(token)
   })

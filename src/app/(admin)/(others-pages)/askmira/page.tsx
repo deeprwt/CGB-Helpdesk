@@ -35,13 +35,13 @@ async function call(method: "GET" | "DELETE", query = "") {
 }
 
 /**
- * AskMira — which of the admin's companies are connected to an AskMira
+ * AskMiraa — which of the admin's companies are connected to an AskMiraa
  * workspace (the HRMS), and a way to disconnect. Connecting starts in
- * AskMira: Settings → Connectors → Connect.
+ * AskMiraa: Settings → Connectors → Connect.
  */
 export default function AskMiraPage() {
   const [companies, setCompanies] = React.useState<Company[] | null>(null)
-  // Why connecting can't work here yet (the AskMira tables are missing), when it can't.
+  // Why connecting can't work here yet (the AskMiraa tables are missing), when it can't.
   const [problem, setProblem] = React.useState<string | null>(null)
   const [removing, setRemoving] = React.useState<Company | null>(null)
   const [busy, setBusy] = React.useState(false)
@@ -64,7 +64,7 @@ export default function AskMiraPage() {
     try {
       const r = await call("DELETE", `?organization_id=${encodeURIComponent(removing.id)}`)
       setCompanies(r.organizations)
-      toast.success(`${removing.name} is disconnected from AskMira`)
+      toast.success(`${removing.name} is disconnected from AskMiraa`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not disconnect.")
     } finally {
@@ -77,8 +77,8 @@ export default function AskMiraPage() {
     <RoleGate allowedRoles={["admin", "superadmin"]}>
       <div className="flex flex-col gap-6">
         <PageHeader
-          title="AskMira"
-          description="Companies connected to AskMira, the HRMS. AskMira sends their people here, signs them in without a second password, and shows them their tickets and assets."
+          title="AskMiraa"
+          description="Companies connected to AskMiraa, the HRMS. AskMiraa sends their people here, signs them in without a second password, and shows them their tickets and assets."
         />
 
         {problem ? (
@@ -94,7 +94,7 @@ export default function AskMiraPage() {
           <CardHeader>
             <CardTitle>How to connect</CardTitle>
             <CardDescription>
-              An admin of the company&apos;s AskMira workspace opens Settings → Connectors there and presses
+              An admin of the company&apos;s AskMiraa workspace opens Settings → Connectors there and presses
               Connect on CGB Helpdesk. You then sign in here, choose the company and press Allow.
             </CardDescription>
           </CardHeader>
@@ -126,7 +126,7 @@ export default function AskMiraPage() {
                     <>
                       <p className="flex items-center gap-2">
                         <Link2 className="size-4 text-gray-400" />
-                        AskMira workspace “{company.askmira_workspace ?? "—"}”
+                        AskMiraa workspace “{company.askmira_workspace ?? "—"}”
                         {company.askmira_origin ? ` at ${company.askmira_origin}` : ""}
                       </p>
                       {company.connected_at ? (
@@ -142,7 +142,7 @@ export default function AskMiraPage() {
                       </div>
                     </>
                   ) : (
-                    <p>Not connected to AskMira.</p>
+                    <p>Not connected to AskMiraa.</p>
                   )}
                 </CardContent>
               </Card>
@@ -153,8 +153,8 @@ export default function AskMiraPage() {
         <ConfirmDialog
           open={removing !== null}
           onOpenChange={(open) => !open && setRemoving(null)}
-          title={`Disconnect ${removing?.name ?? ""} from AskMira?`}
-          description="AskMira stops sending people, signing them in and showing their tickets and assets at once. Accounts, tickets and assets here stay as they are. An AskMira admin can connect again later."
+          title={`Disconnect ${removing?.name ?? ""} from AskMiraa?`}
+          description="AskMiraa stops sending people, signing them in and showing their tickets and assets at once. Accounts, tickets and assets here stay as they are. An AskMiraa admin can connect again later."
           confirmLabel="Disconnect"
           variant="warning"
           loading={busy}

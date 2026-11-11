@@ -200,7 +200,7 @@ export async function getStaffWorkDomains(
 /**
  * Admins who should hear about a ticket: every superadmin, plus admins whose
  * email domain is the requester's organization or who were granted access to
- * it (Super Admin → Access Control). Same rule AskMira uses.
+ * it (Super Admin → Access Control). Same rule AskMiraa uses.
  *
  * Loads admins and grants once and returns a picker, so loops over many
  * tickets (e.g. the SLA check) don't re-query per ticket.

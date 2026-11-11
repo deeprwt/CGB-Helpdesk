@@ -11,9 +11,9 @@ import { Card, CardContent } from "@/components/ui/card"
 const LANDING = /^\/(?!\/)[A-Za-z0-9._~/-]{0,200}$/
 
 /**
- * /sso/askmira#token=…&next=… — someone opened the helpdesk from AskMira.
+ * /sso/askmira#token=…&next=… — someone opened the helpdesk from AskMiraa.
  * The token goes to the server once; its answer becomes a session here, and
- * the person lands where AskMira sent them, without a second password.
+ * the person lands where AskMiraa sent them, without a second password.
  */
 export default function AskMiraSignIn() {
   const [error, setError] = React.useState<string | null>(null)
@@ -29,7 +29,7 @@ export default function AskMiraSignIn() {
     // The token works once; keep it out of the history either way.
     window.history.replaceState(null, "", window.location.pathname)
     if (!token) {
-      setError("This sign-in link is not complete. Open the helpdesk again from AskMira.")
+      setError("This sign-in link is not complete. Open the helpdesk again from AskMiraa.")
       return
     }
     const exchange = async () => {
@@ -40,10 +40,10 @@ export default function AskMiraSignIn() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.token_hash) {
-        setError(data.error ?? "Could not sign you in. Open the helpdesk again from AskMira.")
+        setError(data.error ?? "Could not sign you in. Open the helpdesk again from AskMiraa.")
         return
       }
-      // Someone else may be signed in on this browser: this link is for the person AskMira sent.
+      // Someone else may be signed in on this browser: this link is for the person AskMiraa sent.
       await supabase.auth.signOut({ scope: "local" }).catch(() => {})
       const { error: otpError } = await supabase.auth.verifyOtp({
         token_hash: data.token_hash,
@@ -74,7 +74,7 @@ export default function AskMiraSignIn() {
             </div>
           ) : (
             <div className="flex items-center justify-center gap-3 py-6 text-sm text-gray-500 dark:text-gray-400">
-              <Loader2 className="size-5 animate-spin" /> Signing you in from AskMira…
+              <Loader2 className="size-5 animate-spin" /> Signing you in from AskMiraa…
             </div>
           )}
         </CardContent>
