@@ -222,6 +222,12 @@ begin
     revoke select on public.askmira_links, public.askmira_connect_codes,
                      public.askmira_people, public.askmira_used_tokens from authenticated;
   end if;
+  -- Leftover table created in the dashboard: unused by the app, RLS was off and
+  -- anon could write to it. Server-only from now on.
+  if to_regclass('public.asset_activity_log') is not null then
+    alter table public.asset_activity_log enable row level security;
+    revoke all on public.asset_activity_log from anon, authenticated;
+  end if;
 end $$;
 
 -- The only browser writes left: your own profile fields, and "mark as read".
