@@ -7,23 +7,27 @@ import "server-only"
 // AskMiraa may:
 //
 //   POST /api/integrations/askmira/platform/ping           check the key
-//   POST /api/integrations/askmira/platform/organizations  find a client company here
+//   POST /api/integrations/askmira/platform/organizations  find a tenant here
 //   POST /api/integrations/askmira/platform/provision      create or attach one
 //
-// A connected organization is a client company inside one helpdesk tenant (the
-// IT team serving it). New companies go into the tenant named by
-// ASKMIRA_PLATFORM_TENANT (its slug), or the only active tenant when there is
-// just one. `provision` creates the company there, or attaches the company the
-// super admin picked, and answers with that company's own secret, exactly as
-// Allow does (connect.ts). It gives nobody a role: the people sync that follows
-// adds the company's people as users, and the IT team here grants any other.
+// An AskMiraa organisation is a TENANT here, never a client company inside
+// someone else's tenant. `provision` creates the tenant (with the helpdesk's
+// standard categories, priorities and SLAs, as the super admin's "new tenant"
+// does), one company inside it for the people AskMiraa sends, and invites
+// AskMiraa's admin as the tenant's admin. Or it attaches the tenant the super
+// admin picked. Either way it answers with the connection's own secret,
+// exactly as Allow does (connect.ts).
 //
-// It never makes a second company with the same name in a tenant: it answers
-// 409 "existing" naming it, and AskMiraa's super admin links that one.
+// It never makes a second tenant with the same name unasked: it answers 409
+// "existing" naming it, and AskMiraa's super admin links that one or asks for
+// a new one anyway (`create_new`).
 
 import crypto from "node:crypto"
 
 import { NextResponse } from "next/server"
+
+import { InviteError, invitePerson } from "@/lib/invite"
+import { seedTenantDefaults } from "@/lib/itsm-server"
 
 import {
   BRAND,
@@ -44,13 +48,13 @@ import {
   safeEqual,
   sha256hex,
   spendOnce,
-  tenantActive,
   verify,
   type Claims,
   type Organization,
 } from "./core"
 
 const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
 
 /** A refusal AskMiraa acts on: its `code` and what it names travel beside the message. */
 class Refusal extends HttpError {
@@ -100,72 +104,68 @@ async function platformAssertion(req: Request) {
   return { claims, body }
 }
 
-type Tenant = { id: string; name: string; slug: string }
+type Tenant = { id: string; name: string; slug: string; status: string }
+const TENANT_COLUMNS = "id, name, slug, status"
 
-/** The helpdesk tenant new companies from AskMiraa go into. */
-async function homeTenant(): Promise<Tenant> {
-  const slug = (process.env.ASKMIRA_PLATFORM_TENANT ?? "").trim().toLowerCase()
-  let q = db().from("tenants").select("id, name, slug").eq("status", "active")
-  if (slug) q = q.eq("slug", slug)
-  const { data, error } = await q.limit(2)
-  if (error) throw error
-  const rows = (data ?? []) as Tenant[]
-  if (slug && rows.length === 0) {
-    throw refuse(409, `The helpdesk has no active tenant "${slug}" (ASKMIRA_PLATFORM_TENANT).`)
-  }
-  if (rows.length !== 1) {
-    throw refuse(
-      409,
-      "The helpdesk has more than one tenant: set ASKMIRA_PLATFORM_TENANT to the slug of the one AskMiraa's companies belong to."
-    )
-  }
-  return rows[0]
-}
+/** Letters and digits only: "Artbox Solutions" and "ArtboxSolutions" are the same name. */
+const nameKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "")
 
-/** Each company with its tenant, its admins here and the AskMiraa workspace it is connected to. */
-async function describe(orgs: Organization[]) {
-  if (orgs.length === 0) return []
-  const ids = orgs.map((o) => o.id)
-  const [{ data: links, error }, { data: admins }, { data: tenants }] = await Promise.all([
-    db().from("askmira_links").select("organization_id, askmira_tenant_id").in("organization_id", ids),
-    db().from("users").select("email, organization_id").eq("role", "admin").in("organization_id", ids),
-    db().from("tenants").select("id, name").in("id", [...new Set(orgs.map((o) => o.tenant_id))]),
+/** Each tenant with its admins and the AskMiraa workspace it is connected to. */
+async function describe(tenants: Tenant[]) {
+  if (tenants.length === 0) return []
+  const ids = tenants.map((t) => t.id)
+  const [{ data: admins }, { data: orgs }] = await Promise.all([
+    db().from("users").select("email, tenant_id").eq("role", "admin").in("tenant_id", ids),
+    db().from("organizations").select("id, tenant_id").in("tenant_id", ids),
   ])
+  const orgIds = (orgs ?? []).map((o) => o.id as string)
+  const { data: links, error } = orgIds.length
+    ? await db().from("askmira_links").select("organization_id, askmira_tenant_id").in("organization_id", orgIds)
+    : { data: [], error: null }
   if (error) throw error
-  const tenantName = new Map((tenants ?? []).map((t) => [t.id as string, t.name as string]))
-  return orgs.map((org) => ({
-    ref: org.id,
-    name: tenantName.get(org.tenant_id) ? `${org.name} (${tenantName.get(org.tenant_id)})` : org.name,
+  const tenantOfOrg = new Map((orgs ?? []).map((o) => [o.id as string, o.tenant_id as string]))
+  return tenants.map((tenant) => ({
+    ref: tenant.id,
+    name: tenant.name,
     admins: (admins ?? [])
-      .filter((a) => a.organization_id === org.id)
+      .filter((a) => a.tenant_id === tenant.id)
       .slice(0, 5)
       .map((a) => normEmail(a.email)),
-    connected_to: links?.find((l) => l.organization_id === org.id)?.askmira_tenant_id ?? null,
+    connected_to:
+      (links ?? []).find((l) => tenantOfOrg.get(l.organization_id) === tenant.id)?.askmira_tenant_id ?? null,
   }))
 }
 
 async function organizations(body: Record<string, unknown>) {
   const q = clean(body.q, 120)
   if (!q || q.length < 2) throw refuse(422, "Type at least two letters.")
-  // "someone@acme.com" finds the company whose domain is acme.com.
-  // Dots stay (domains); wildcards and the filter syntax PostgREST would read go.
-  const term = (q.includes("@") ? q.split("@")[1] || q : q)
+  const found = new Map<string, Tenant>()
+  // An admin's email finds the tenant that person is in.
+  if (EMAIL_RE.test(normEmail(q))) {
+    const { data: person } = await db().from("users").select("tenant_id").eq("email", normEmail(q)).maybeSingle()
+    if (person?.tenant_id) {
+      const { data } = await db().from("tenants").select(TENANT_COLUMNS).eq("id", person.tenant_id).maybeSingle()
+      if (data) found.set(data.id, data as Tenant)
+    }
+  }
+  // Wildcards and the filter syntax PostgREST would read go.
+  const term = q
     .toLowerCase()
     .replace(/[%_*\\,():"']/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 100)
-  if (term.length < 2) throw refuse(422, "Type at least two letters.")
-  const { data, error } = await db()
-    .from("organizations")
-    .select(ORGANIZATION_COLUMNS)
-    .eq("status", "active")
-    .or(`name.ilike.%${term}%,domain.ilike.%${term}%`)
-    .order("name")
-    .limit(20)
-  if (error) throw error
-  const orgs = (data ?? []).filter((o) => o.tenant_id).map((o) => asOrganization(o))
-  return { organizations: await describe(orgs) }
+  if (term.length >= 2) {
+    const { data, error } = await db()
+      .from("tenants")
+      .select(TENANT_COLUMNS)
+      .or(`name.ilike.%${term}%,slug.ilike.%${term.replace(/\s+/g, "-")}%`)
+      .order("name")
+      .limit(20)
+    if (error) throw error
+    for (const tenant of (data ?? []) as Tenant[]) found.set(tenant.id, tenant)
+  }
+  return { organizations: await describe([...found.values()].filter((t) => t.status === "active")) }
 }
 
 /** Connect the company to that AskMiraa workspace: a fresh nonce, so a fresh secret. */
@@ -203,39 +203,138 @@ function originOf(value: unknown): string | null {
   }
 }
 
-function answer(org: Organization, secret: string, created: boolean) {
+function answer(
+  tenant: Pick<Tenant, "name">,
+  org: Organization,
+  secret: string,
+  created: boolean,
+  admin: { created: boolean; note?: string } = { created: false }
+) {
   return {
     product: PRODUCT,
     brand: BRAND,
     secret,
     external_ref: org.id,
-    organization: org.name,
+    organization: tenant.name,
     created,
-    // Nobody is made an admin here; the people sync adds the company's people as users.
-    admin_created: false,
+    admin_created: admin.created,
+    ...(admin.note ? { admin_note: admin.note } : {}),
   }
 }
 
-async function orgBy(column: "id", value: string): Promise<Organization | null> {
-  const { data, error } = await db()
-    .from("organizations")
-    .select(ORGANIZATION_COLUMNS)
-    .eq(column, value)
-    .maybeSingle()
+async function orgById(id: string): Promise<Organization | null> {
+  const { data, error } = await db().from("organizations").select(ORGANIZATION_COLUMNS).eq("id", id).maybeSingle()
   if (error) throw error
   return data && data.tenant_id ? asOrganization(data) : null
 }
 
-/** A company of that tenant with the same name (case-insensitive) or, when given, the same domain. */
-async function sameCompany(tenantId: string, name: string, domain: string | null) {
+async function tenantById(id: string): Promise<Tenant | null> {
+  const { data, error } = await db().from("tenants").select(TENANT_COLUMNS).eq("id", id).maybeSingle()
+  if (error) throw error
+  return (data as Tenant | null) ?? null
+}
+
+/**
+ * The company inside the tenant that AskMiraa's people belong to: the one named
+ * like the tenant, else the tenant's only company, else a new one.
+ */
+async function homeCompany(tenant: Tenant, domain: string | null): Promise<Organization> {
   const rows = await allRows((from, to) =>
-    db().from("organizations").select(ORGANIZATION_COLUMNS).eq("tenant_id", tenantId).order("id").range(from, to)
+    db().from("organizations").select(ORGANIZATION_COLUMNS).eq("tenant_id", tenant.id).order("id").range(from, to)
   )
-  const wanted = name.trim().toLowerCase()
-  return rows
-    .map((o) => asOrganization(o as Record<string, unknown>))
-    .filter((o) => o.name.trim().toLowerCase() === wanted || (domain !== null && o.domain === domain))
+  const orgs = rows.map((o) => asOrganization(o as Record<string, unknown>))
+  const same = orgs.find((o) => nameKey(o.name) === nameKey(tenant.name))
+  if (same) return same
+  if (orgs.length === 1) return orgs[0]
+  const { data, error } = await db()
+    .from("organizations")
+    .insert({ tenant_id: tenant.id, name: tenant.name, domain, status: "active" })
+    .select(ORGANIZATION_COLUMNS)
+    .single()
+  if (error?.code === "23505") {
+    const again = await homeCompany(tenant, domain)
+    return again
+  }
+  if (error) throw error
+  return asOrganization(data)
+}
+
+/** Tenants that look like this company: the same name (ignoring spaces and case) or the same short name. */
+async function sameTenants(name: string, slug: string | null): Promise<Tenant[]> {
+  const rows = await allRows((from, to) =>
+    db().from("tenants").select(TENANT_COLUMNS).order("id").range(from, to)
+  )
+  return (rows as Tenant[])
+    .filter((t) => nameKey(t.name) === nameKey(name) || (slug !== null && t.slug === slug))
     .slice(0, 5)
+}
+
+/** A free short name for the new tenant: AskMiraa's, else one made from the name, numbered if taken. */
+async function freeSlug(wanted: string | null, name: string) {
+  const base =
+    (wanted && SLUG_RE.test(wanted) ? wanted : null) ??
+    (name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "company")
+  const start = SLUG_RE.test(base) ? base : `${base}-co`
+  const { data, error } = await db().from("tenants").select("slug").ilike("slug", `${start}%`)
+  if (error) throw error
+  const taken = new Set((data ?? []).map((t) => t.slug as string))
+  if (!taken.has(start)) return start
+  for (let n = 2; n < 1000; n++) {
+    if (!taken.has(`${start}-${n}`)) return `${start}-${n}`
+  }
+  return `${start}-${crypto.randomBytes(3).toString("hex")}`
+}
+
+/** A new tenant for the company, with the helpdesk's defaults, its company and its admin. */
+async function createTenant(params: {
+  name: string
+  slug: string | null
+  domain: string | null
+  admin: { email: string; name: string }
+}) {
+  const slug = await freeSlug(params.slug, params.name)
+  const { data, error } = await db()
+    .from("tenants")
+    .insert({ name: params.name, slug, status: "active" })
+    .select(TENANT_COLUMNS)
+    .single()
+  if (error) throw error
+  const tenant = data as Tenant
+  let org: Organization | null = null
+  try {
+    // Starter categories, priority matrix, SLA policies and business hours.
+    await seedTenantDefaults(db(), tenant.id)
+    org = await homeCompany(tenant, params.domain)
+    let admin: { created: boolean; note?: string }
+    try {
+      const invited = await invitePerson(db(), {
+        email: params.admin.email,
+        fullName: params.admin.name,
+        role: "admin",
+        tenant,
+        organizationId: org.id,
+        inviter: { id: "", full_name: "AskMiraa", email: "" },
+      })
+      admin = { created: true, note: invited.emailed ? undefined : "The invitation email could not be sent." }
+    } catch (err) {
+      // One tenant per person: someone already in another tenant can't be its admin too.
+      if (!(err instanceof InviteError) || err.status !== 409) throw err
+      admin = {
+        created: false,
+        note: `${params.admin.email} already has a ${BRAND} login in another tenant, so they were not made this tenant's admin.`,
+      }
+    }
+    return { tenant, org, admin }
+  } catch (err) {
+    // Nothing half made: the super admin can simply try again.
+    if (org) await db().from("organizations").delete().eq("id", org.id)
+    await db().from("tenants").delete().eq("id", tenant.id)
+    throw err
+  }
 }
 
 async function provision(body: Record<string, unknown>, claims: Claims) {
@@ -246,75 +345,59 @@ async function provision(body: Record<string, unknown>, claims: Claims) {
   await spendOnce(claims, "This request was already carried out.")
   const tenantId = String(body.tenant_id ?? "").toLowerCase()
   const company = obj(body.company)
-  const admin = obj(body.admin)
-  const name = clean(company.name, 200) ?? clean(body.tenant_name, 200)
-  const email = normEmail(admin.email)
+  const adminIn = obj(body.admin)
+  const name = clean(company.name, 120) ?? clean(body.tenant_name, 120)
+  const email = normEmail(adminIn.email)
   const ref = clean(body.organization_ref, 120)
   if (!UUID_RE.test(tenantId) || !name || !EMAIL_RE.test(email)) {
     throw refuse(422, "AskMiraa sent an incomplete company.")
   }
   const askmira = { id: tenantId, name: clean(body.tenant_name, 200) ?? name, origin: originOf(body.askmira_origin) }
+  const given = String(company.domain ?? "").trim().toLowerCase()
+  const fromEmail = email.split("@")[1] ?? ""
+  const domain = DOMAIN_RE.test(given) ? given : DOMAIN_RE.test(fromEmail) ? fromEmail : null
 
-  // Attach the company the super admin picked.
+  // Attach the tenant the super admin picked.
   if (ref) {
-    const org = UUID_RE.test(ref) ? await orgBy("id", ref) : null
-    if (!org) throw refuse(404, "No such organization in the helpdesk.")
-    if (org.status !== "active" || !(await tenantActive(org.tenant_id))) {
-      throw refuse(409, `${org.name} is switched off in the helpdesk.`)
+    const tenant = UUID_RE.test(ref) ? await tenantById(ref) : null
+    if (!tenant) throw refuse(404, "No such tenant in the helpdesk.")
+    if (tenant.status !== "active") throw refuse(409, `${tenant.name} is suspended in the helpdesk.`)
+    const [mine] = await describe([tenant])
+    if (mine.connected_to && mine.connected_to !== tenantId) {
+      throw refuse(409, `${tenant.name} is connected to another AskMiraa workspace.`, { code: "taken" })
     }
-    const { data: link } = await db()
-      .from("askmira_links")
-      .select("askmira_tenant_id")
-      .eq("organization_id", org.id)
-      .maybeSingle()
-    if (link && link.askmira_tenant_id !== tenantId) {
-      throw refuse(409, `${org.name} is connected to another AskMiraa workspace.`, { code: "taken" })
-    }
+    const org = await homeCompany(tenant, domain)
     const secret = await connect(org, askmira)
-    console.log(`[AskMiraa] platform attached ${org.name} (${org.id}) to workspace ${tenantId}`)
-    return answer(org, secret, false)
+    console.log(`[AskMiraa] platform attached tenant ${tenant.slug} to workspace ${tenantId}`)
+    return answer(tenant, org, secret, false)
   }
 
-  // Already connected here (AskMiraa lost its key, or asked twice): the same company, a new key.
+  // Already connected here (AskMiraa lost its key, or asked twice): the same place, a new key.
   const { data: linked } = await db()
     .from("askmira_links")
     .select("organization_id")
     .eq("askmira_tenant_id", tenantId)
     .maybeSingle()
   if (linked) {
-    const org = await orgBy("id", linked.organization_id)
-    if (org) return answer(org, await connect(org, askmira), false)
+    const org = await orgById(linked.organization_id)
+    const tenant = org ? await tenantById(org.tenant_id) : null
+    if (org && tenant) return answer(tenant, org, await connect(org, askmira), false)
   }
 
-  const tenant = await homeTenant()
-  // The domain is informational here; it helps find the company again.
-  const given = String(company.domain ?? "").trim().toLowerCase()
-  const fromEmail = email.split("@")[1] ?? ""
-  const domain = DOMAIN_RE.test(given) ? given : DOMAIN_RE.test(fromEmail) ? fromEmail : null
-  const existing = await sameCompany(tenant.id, name, domain)
-  if (existing.length > 0) {
-    throw refuse(409, `${tenant.name} already has ${existing[0].name} in the helpdesk.`, {
-      code: "existing",
-      organizations: await describe(existing),
-    })
+  const slug = clean(company.slug, 63)?.toLowerCase() ?? null
+  if (body.create_new !== true) {
+    const existing = await sameTenants(name, slug)
+    if (existing.length > 0) {
+      throw refuse(409, `The helpdesk already has a tenant called ${existing[0].name}.`, {
+        code: "existing",
+        organizations: await describe(existing),
+      })
+    }
   }
-  const { data: made, error } = await db()
-    .from("organizations")
-    .insert({ tenant_id: tenant.id, name, domain, status: "active" })
-    .select(ORGANIZATION_COLUMNS)
-    .single()
-  if (error?.code === "23505") {
-    const raced = await sameCompany(tenant.id, name, domain)
-    throw refuse(409, `${tenant.name} already has ${name} in the helpdesk.`, {
-      code: "existing",
-      organizations: await describe(raced),
-    })
-  }
-  if (error) throw error
-  const org = asOrganization(made)
-  const secret = await connect(org, askmira)
-  console.log(`[AskMiraa] platform created ${org.name} (${org.id}) in ${tenant.slug} for workspace ${tenantId}`)
-  return answer(org, secret, true)
+  const made = await createTenant({ name, slug, domain, admin: { email, name: clean(adminIn.name, 120) ?? email } })
+  const secret = await connect(made.org, askmira)
+  console.log(`[AskMiraa] platform created tenant ${made.tenant.slug} for workspace ${tenantId}`)
+  return answer(made.tenant, made.org, secret, true, made.admin)
 }
 
 /** POST platform/{ping,organizations,provision} — AskMiraa's platform (use=platform). */
@@ -322,20 +405,15 @@ export async function platformRoute(req: Request, action: string) {
   try {
     const { body, claims } = await platformAssertion(req)
     if (action === "ping") {
-      let message = `${BRAND} is ready.`
-      let ready = canConnect()
-      if (!ready) message = "Set ASKMIRA_LINK_SECRET (at least 32 characters) on the helpdesk first."
-      else {
-        try {
-          const tenant = await homeTenant()
-          message = `${BRAND} is ready. New companies go into ${tenant.name}.`
-        } catch (err) {
-          if (!(err instanceof HttpError)) throw err
-          ready = false
-          message = err.message
-        }
-      }
-      return NextResponse.json({ product: PRODUCT, brand: BRAND, ready, message })
+      const ready = canConnect()
+      return NextResponse.json({
+        product: PRODUCT,
+        brand: BRAND,
+        ready,
+        message: ready
+          ? `${BRAND} is ready. Each AskMiraa organisation becomes its own tenant.`
+          : "Set ASKMIRA_LINK_SECRET (at least 32 characters) on the helpdesk first.",
+      })
     }
     if (action === "organizations") return NextResponse.json(await organizations(body))
     if (action === "provision") return NextResponse.json(await provision(body, claims))
@@ -344,6 +422,9 @@ export async function platformRoute(req: Request, action: string) {
     if (err instanceof HttpError) {
       const extra = err instanceof Refusal ? err.extra : {}
       return NextResponse.json({ ...extra, error: err.message }, { status: err.status })
+    }
+    if (err instanceof InviteError) {
+      return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status })
     }
     if (isMissingTable(err)) {
       console.error("[AskMiraa] the AskMiraa tables are missing:", err)
