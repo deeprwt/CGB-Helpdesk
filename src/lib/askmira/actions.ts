@@ -13,7 +13,8 @@
 // carries the connected company's tenant.
 
 import { sendTicketEmail } from "@/lib/email"
-import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
+import { REQUESTER_TICKET_TYPES, isPriority, isTicketType, type TicketType } from "@/lib/itsm"
+import { checkCategory, loadItsmConfig, resolvePriority, slaDeadlines } from "@/lib/itsm-server"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
 import {
   BRAND,
@@ -44,16 +45,36 @@ async function createTicket(ctx: Ctx) {
   const subject = clean(params.subject, 200)
   if (!subject || subject.length < 3) throw httpError(422, "Give the ticket a subject.")
   const description = clean(params.description, 5000)
-  const category = clean(params.category)
-  if (!category || !(category in CATEGORY_MAP)) throw httpError(422, "Choose a category.")
-  const subCategory = clean(params.sub_category)
-  if (subCategory && !CATEGORY_MAP[category].includes(subCategory)) {
-    throw httpError(422, "That sub category is not in the category you chose.")
-  }
-  const priority = clean(params.priority)
-  if (!priority || !(PRIORITIES as readonly string[]).includes(priority)) {
+  const tenantId = org.tenant_id
+  const config = await loadItsmConfig(db(), tenantId)
+
+  // Category from the tenant's own list. The record type follows the category
+  // (a category kept for service requests raises a service request), unless
+  // AskMiraa says which of the two it is.
+  const categoryRaw = clean(params.category)
+  if (!categoryRaw) throw httpError(422, "Choose a category.")
+  const parentCat = config.categories.find(
+    (c) => !c.parent_id && c.is_active && c.name.toLowerCase() === categoryRaw.toLowerCase()
+  )
+  const askedType = clean(params.ticket_type)
+  const ticketType: TicketType =
+    askedType && isTicketType(askedType) && REQUESTER_TICKET_TYPES.includes(askedType)
+      ? askedType
+      : parentCat?.ticket_types && !parentCat.ticket_types.includes("incident")
+        ? "service_request"
+        : "incident"
+  const cat = checkCategory(config, ticketType, categoryRaw, clean(params.sub_category))
+  if ("error" in cat) throw httpError(422, cat.error === "That category is not available" ? "Choose a category." : `${cat.error}.`)
+  const category = cat.category
+  const subCategory = cat.subCategory
+
+  // Priority: from impact × urgency when given, else the priority chosen in the form
+  const asked = { impact: clean(params.impact), urgency: clean(params.urgency), priority: clean(params.priority) }
+  if (!(asked.impact && asked.urgency) && !isPriority(asked.priority)) {
     throw httpError(422, "Choose a priority: low, medium or high.")
   }
+  const { impact, urgency, priority } = resolvePriority(config, asked, false)
+  const sla = slaDeadlines(config, ticketType, priority, new Date())
   const contact =
     clean(params.contact, 30) ?? (me.phone === null || me.phone === undefined ? null : String(me.phone))
   const location = clean(params.location)
@@ -71,7 +92,6 @@ async function createTicket(ctx: Ctx) {
     if (!held?.length) throw httpError(422, "That asset is not assigned to you.")
   }
 
-  const tenantId = org.tenant_id
   const requesterName = me.full_name || me.email
   const { data: ticket, error } = await db()
     .from("tickets")
@@ -82,15 +102,20 @@ async function createTicket(ctx: Ctx) {
       contact,
       subject,
       description,
+      ticket_type: ticketType,
       category,
       sub_category: subCategory,
+      impact,
+      urgency,
       priority,
       status: "new",
       location,
       link,
-      sla_response_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      sla_response_at: sla.sla_response_at,
+      sla_resolution_at: sla.sla_resolution_at,
+      sla_business_hours: sla.sla_business_hours,
     })
-    .select("id, subject, status, created_at")
+    .select("id, number, subject, status, created_at")
     .single()
   if (error || !ticket) throw error ?? new Error("The ticket was not created.")
 
@@ -113,6 +138,7 @@ async function createTicket(ctx: Ctx) {
       event: "created",
       ticket: {
         id: ticket.id,
+        number: ticket.number,
         tenant_id: tenantId,
         subject,
         requester_id: me.id,
@@ -129,7 +155,18 @@ async function createTicket(ctx: Ctx) {
   )
 
   console.log(`[AskMiraa] ticket #${ref} raised for ${org.name} (${org.id}) by ${me.email}`)
-  return { ticket: { id: ticket.id, ref, subject, status: ticket.status, created_at: ticket.created_at } }
+  return {
+    ticket: {
+      id: ticket.id,
+      ref,
+      number: ticket.number,
+      ticket_type: ticketType,
+      priority,
+      subject,
+      status: ticket.status,
+      created_at: ticket.created_at,
+    },
+  }
 }
 
 async function reply(ctx: Ctx) {

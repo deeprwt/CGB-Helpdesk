@@ -6,19 +6,13 @@ import {
   Clock,
   FileText,
   Link2,
-  PauseCircle,
   Paperclip,
-  Pencil,
-  ShieldCheck,
-  Timer,
-  type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -34,7 +28,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { StatusBadge, type BadgeTone } from "@/components/common/status-badge"
+import { StatusBadge } from "@/components/common/status-badge"
+import { PRIORITY_LABELS, TICKET_TYPE_LABELS, type Priority, type TicketType } from "@/lib/itsm"
+import { PRIORITY_TONE, TYPE_TONE, fmtDateTime } from "./itsm-ticket"
 
 /* -----------------------------------
    Types
@@ -45,20 +41,12 @@ type Attachment = {
   file_path: string
 }
 
-type SlaInfo = {
-  responseAt?: string | null
-  resolutionAt?: string | null
-  responseBreached?: boolean
-  resolutionBreached?: boolean
-  holdUntil?: string | null
-  holdStartedAt?: string | null
-  holdDurationHours?: number | null
-}
-
 type Props = {
-  ticketId: string
+  /** Display reference, e.g. INC0001012 */
+  ticketRef: string
+  ticketType: TicketType
   subject: string
-  priority: "low" | "medium" | "high"
+  priority: Priority
   requesterName: string
   requesterAvatar?: string | null
   assigneeText?: string | null
@@ -69,30 +57,14 @@ type Props = {
   /** Optional extras (display only) */
   description?: string | null
   status?: string
-  category?: string | null
-  subCategory?: string | null
   engineers?: { id: string; name: string }[]
-  sla?: SlaInfo
+  /** Resolution SLA deadline, shown as the due date */
+  resolutionDue?: string | null
 }
 
 /* -----------------------------------
    Helpers
 ----------------------------------- */
-function formatProjectNo(id: string) {
-  const cleaned = id.replace(/-/g, "").slice(0, 7).toUpperCase()
-  return `PN${cleaned}`
-}
-
-function getDeadline(date: string) {
-  const d = new Date(date)
-  d.setDate(d.getDate() + 2)
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-}
-
 function formatTimeLogged(fromDate: string): string {
   const ms = Math.max(0, Date.now() - new Date(fromDate).getTime())
   const totalMinutes = Math.floor(ms / 60000)
@@ -116,24 +88,6 @@ function hoursSince(fromDate: string): number {
   return Math.max(0, Date.now() - new Date(fromDate).getTime()) / 3600000
 }
 
-/** Elapsed share (0–100) of the window between `start` and `end`. */
-function elapsedPct(start: string | number, end: string): number {
-  const s = new Date(start).getTime()
-  const e = new Date(end).getTime()
-  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return 100
-  return Math.min(100, Math.max(0, ((Date.now() - s) / (e - s)) * 100))
-}
-
-function fmtDateTime(d: string) {
-  return new Date(d).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
 function initials(name?: string | null) {
   return (name ?? "?").trim()[0]?.toUpperCase() ?? "?"
 }
@@ -141,12 +95,6 @@ function initials(name?: string | null) {
 /* -----------------------------------
    Visual config
 ----------------------------------- */
-const PRIORITY: Record<Props["priority"], { label: string; tone: BadgeTone }> = {
-  high: { label: "High", tone: "red" },
-  medium: { label: "Medium", tone: "amber" },
-  low: { label: "Low", tone: "emerald" },
-}
-
 const AVATAR_GRADIENTS = [
   "from-brand-500 to-brand-600",
   "from-sky-500 to-brand-500",
@@ -155,22 +103,6 @@ const AVATAR_GRADIENTS = [
   "from-rose-500 to-pink-500",
   "from-violet-500 to-fuchsia-500",
 ]
-
-const PROGRESS_TONE = {
-  indigo: "[&_[data-slot=progress-indicator]]:bg-brand-500",
-  emerald: "[&_[data-slot=progress-indicator]]:bg-emerald-500",
-  amber: "[&_[data-slot=progress-indicator]]:bg-amber-500",
-  red: "[&_[data-slot=progress-indicator]]:bg-red-500",
-} as const
-
-type SlaRow = {
-  key: string
-  label: string
-  icon: LucideIcon
-  value: React.ReactNode
-  pct: number | null
-  tone: keyof typeof PROGRESS_TONE
-}
 
 /* -----------------------------------
    Small pieces
@@ -192,7 +124,8 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
    Component
 ----------------------------------- */
 export default function TicketMetaPanel({
-  ticketId,
+  ticketRef,
+  ticketType,
   subject,
   priority,
   requesterName,
@@ -204,76 +137,13 @@ export default function TicketMetaPanel({
   link,
   description,
   status,
-  category,
-  subCategory,
   engineers = [],
-  sla,
+  resolutionDue,
 }: Props) {
   const ESTIMATE_HOURS = 80 // 3d 8h
 
   const timeLoggedHours = assignedAt ? hoursSince(assignedAt) : 0
   const progress = Math.min((timeLoggedHours / ESTIMATE_HOURS) * 100, 100)
-
-  const pCfg = PRIORITY[priority] ?? PRIORITY.medium
-
-  /* SLA rows — same visibility rules as before */
-  const slaRows: SlaRow[] = []
-  if (sla) {
-    if (status === "new" && sla.responseAt) {
-      const breached = sla.responseBreached ?? false
-      slaRows.push({
-        key: "response",
-        label: "Response SLA",
-        icon: Timer,
-        value: breached ? (
-          <StatusBadge tone="red" dot>Breached</StatusBadge>
-        ) : (
-          fmtDateTime(sla.responseAt)
-        ),
-        pct: breached ? 100 : elapsedPct(createdAt, sla.responseAt),
-        tone: breached ? "red" : "indigo",
-      })
-    }
-    if (sla.resolutionAt && assigneeText && status !== "closed") {
-      const breached = sla.resolutionBreached ?? false
-      slaRows.push({
-        key: "resolution",
-        label: "Resolution SLA",
-        icon: ShieldCheck,
-        value: breached ? (
-          <StatusBadge tone="red" dot>Breached</StatusBadge>
-        ) : (
-          fmtDateTime(sla.resolutionAt)
-        ),
-        pct: breached ? 100 : elapsedPct(assignedAt ?? createdAt, sla.resolutionAt),
-        tone: breached ? "red" : "emerald",
-      })
-    }
-    if (status === "hold" && sla.holdUntil) {
-      const holdStart =
-        sla.holdStartedAt ??
-        (sla.holdDurationHours
-          ? new Date(sla.holdUntil).getTime() - sla.holdDurationHours * 3600000
-          : null)
-      slaRows.push({
-        key: "hold",
-        label: "On hold until",
-        icon: PauseCircle,
-        value: (
-          <span className="flex items-center gap-1.5">
-            {fmtDateTime(sla.holdUntil)}
-            {sla.holdDurationHours ? (
-              <StatusBadge tone="amber">{sla.holdDurationHours}h</StatusBadge>
-            ) : null}
-          </span>
-        ),
-        pct: holdStart != null ? elapsedPct(holdStart, sla.holdUntil) : null,
-        tone: "amber",
-      })
-    }
-  }
-
-  const categoryText = [category, subCategory].filter(Boolean).join(" / ")
 
   return (
     <Card className="gap-0 py-0">
@@ -288,25 +158,10 @@ export default function TicketMetaPanel({
               Ticket details
             </CardTitle>
             <CardDescription className="mt-1 font-mono text-xs tracking-wide text-gray-500 dark:text-gray-400">
-              {formatProjectNo(ticketId)}
+              {ticketRef}
             </CardDescription>
           </div>
         </div>
-        <CardAction className="self-center">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-gray-500 hover:bg-brand-50 hover:text-brand-600 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
-                aria-label="Edit ticket"
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit ticket</TooltipContent>
-          </Tooltip>
-        </CardAction>
       </CardHeader>
 
       <CardContent className="flex flex-col gap-5 py-5">
@@ -332,18 +187,16 @@ export default function TicketMetaPanel({
             </MetaRow>
           )}
 
-          <MetaRow label="Priority">
-            <StatusBadge tone={pCfg.tone}>
-              <ArrowUp className="h-3 w-3" strokeWidth={2.5} />
-              {pCfg.label}
-            </StatusBadge>
+          <MetaRow label="Type">
+            <StatusBadge tone={TYPE_TONE[ticketType]}>{TICKET_TYPE_LABELS[ticketType]}</StatusBadge>
           </MetaRow>
 
-          {categoryText && (
-            <MetaRow label="Category">
-              <span className="truncate">{categoryText}</span>
-            </MetaRow>
-          )}
+          <MetaRow label="Priority">
+            <StatusBadge tone={PRIORITY_TONE[priority]}>
+              <ArrowUp className="h-3 w-3" strokeWidth={2.5} />
+              {PRIORITY_LABELS[priority]}
+            </StatusBadge>
+          </MetaRow>
 
           <MetaRow label="Reporter">
             <span className="flex min-w-0 items-center gap-2">
@@ -413,7 +266,7 @@ export default function TicketMetaPanel({
             )}
           </MetaRow>
 
-          <MetaRow label="Due date">{getDeadline(createdAt)}</MetaRow>
+          {resolutionDue && <MetaRow label="Due">{fmtDateTime(resolutionDue)}</MetaRow>}
 
           <MetaRow label="Created">
             {new Date(createdAt).toLocaleDateString("en-US", {
@@ -423,43 +276,6 @@ export default function TicketMetaPanel({
             })}
           </MetaRow>
         </dl>
-
-        {/* ── SLA ─────────────────────────────── */}
-        {slaRows.length > 0 && (
-          <>
-            <Separator className="bg-gray-100 dark:bg-white/10" />
-            <div className="flex flex-col gap-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                Service level
-              </p>
-              {slaRows.map((row) => {
-                const Icon = row.icon
-                return (
-                  <div key={row.key} className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                        <Icon className="h-4 w-4 text-gray-400" />
-                        {row.label}
-                      </span>
-                      <span className="text-right text-xs font-medium text-gray-600 dark:text-gray-300">
-                        {row.value}
-                      </span>
-                    </div>
-                    {row.pct != null && (
-                      <Progress
-                        value={row.pct}
-                        className={cn(
-                          "h-1.5 bg-gray-100 dark:bg-white/10",
-                          PROGRESS_TONE[row.tone]
-                        )}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )}
 
         {/* ── Time Tracking (when assigned) ────── */}
         {assignedAt && (

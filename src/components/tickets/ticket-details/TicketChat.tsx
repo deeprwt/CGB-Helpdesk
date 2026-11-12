@@ -60,6 +60,8 @@ type Message = {
 
 type Props = {
   ticketId: string
+  /** Display reference, e.g. INC0001012 */
+  ticketRef?: string
   ticketSubject?: string
   messages: Message[]
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
@@ -114,6 +116,7 @@ const ACTIVITY_TONE: Record<string, BadgeTone> = {
 ----------------------------------- */
 export default function TicketChat({
   ticketId,
+  ticketRef,
   messages,
   setMessages,
   currentUser,
@@ -245,6 +248,11 @@ export default function TicketChat({
           <div className="min-w-0">
             <CardTitle className="truncate text-base font-semibold text-gray-900 dark:text-white">
               Conversation
+              {ticketRef && (
+                <span className="ml-2 font-mono text-xs font-medium text-gray-400 dark:text-gray-500">
+                  {ticketRef}
+                </span>
+              )}
             </CardTitle>
             <CardDescription className="mt-1 flex items-center gap-1.5 truncate text-xs text-gray-500 dark:text-gray-400">
               <span className="truncate">{otherUser.name}</span>

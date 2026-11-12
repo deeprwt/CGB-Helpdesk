@@ -26,6 +26,7 @@ export type TicketEvent = "created" | "acquired" | "closed" | "hold" | "reopened
 
 export type NotifyTicket = {
   id: string
+  number?: string | null
   tenant_id: string
   subject: string
   requester_id: string
@@ -72,7 +73,7 @@ export async function notifyTicketEvent(
   }
 ): Promise<void> {
   const { event, ticket, actorId, comment } = params
-  const ref = ticket.id.slice(0, 8).toUpperCase()
+  const ref = ticket.number || ticket.id.slice(0, 8).toUpperCase()
 
   const ids = [
     ticket.requester_id,
@@ -277,6 +278,7 @@ export async function notifyTicketEvent(
         recipientName: d.to.name ?? "",
         actorName,
         ticketId: ticket.id,
+        ticketNumber: ticket.number ?? null,
         ticketSubject: ticket.subject,
         action: d.email!.action,
         audience: d.email!.audience,

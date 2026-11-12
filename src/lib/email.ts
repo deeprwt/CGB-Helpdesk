@@ -51,6 +51,8 @@ type SendTicketEmailParams = {
   recipientName: string
   actorName: string
   ticketId: string
+  /** e.g. INC0001012; the short id is shown when missing */
+  ticketNumber?: string | null
   ticketSubject: string
   action: EmailAction
   comment?: string | null
@@ -304,7 +306,7 @@ function detailRows(details: TicketEmailDetails | undefined): string {
 }
 
 function buildEmailHtml(params: SendTicketEmailParams): string {
-  const ticketShortId = params.ticketId.slice(0, 8).toUpperCase()
+  const ticketShortId = params.ticketNumber || params.ticketId.slice(0, 8).toUpperCase()
   const audience = params.audience ?? "requester"
   const details = getActionDetails(params.action, params.actorName, ticketShortId, audience)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
@@ -450,7 +452,7 @@ export async function sendTicketEmail(params: SendTicketEmailParams): Promise<vo
     return
   }
 
-  const ticketShortId = params.ticketId.slice(0, 8).toUpperCase()
+  const ticketShortId = params.ticketNumber || params.ticketId.slice(0, 8).toUpperCase()
   const details = getActionDetails(params.action, params.actorName, ticketShortId, params.audience)
 
   await transporter.sendMail({

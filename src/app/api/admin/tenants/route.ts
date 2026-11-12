@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { EMAIL_RE, jsonError, requireActor, text } from "@/lib/ticket-server"
 import { invitePerson, InviteError } from "@/lib/invite"
+import { seedTenantDefaults } from "@/lib/itsm-server"
 import { fetchAllRows } from "@/lib/fetch-all-rows"
 
 export const runtime = "nodejs"
@@ -92,6 +93,8 @@ export async function POST(req: Request) {
     }
 
     try {
+      // Starter categories, priority matrix, SLA policies and business hours
+      await seedTenantDefaults(db, tenant.id)
       const invited = await invitePerson(db, {
         email: adminEmail,
         fullName: adminName,

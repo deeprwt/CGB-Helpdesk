@@ -13,15 +13,20 @@ import { StatusBadge } from "@/components/common/status-badge"
 import { supabase } from "@/lib/supabaseClient"
 import { STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import { getInitials } from "@/hooks/useCurrentUser"
+import { ticketRef } from "@/lib/itsm"
+import { PriorityBadge, TicketTypeBadge, TICKET_REF_CLASS } from "@/components/tickets/TicketBadges"
 
 
 type Ticket = {
   id: string
+  number: string | null
+  ticket_type: string | null
+  priority: string | null
   subject: string
   location: string | null
   requester_name: string | null
   created_at: string
-  status: "new" | "open" | "in_progress" | "closed"
+  status: string
   category: string | null
   sub_category: string | null
 }
@@ -62,6 +67,9 @@ export default function UserLatestTickets() {
         .from("tickets")
         .select(`
           id,
+          number,
+          ticket_type,
+          priority,
           subject,
           location,
           requester_name,
@@ -74,7 +82,7 @@ export default function UserLatestTickets() {
         .order("created_at", { ascending: false })
         .limit(10)
 
-      if (data) setTickets(data)
+      if (data) setTickets(data as Ticket[])
       setLoading(false)
     }
 
@@ -83,13 +91,17 @@ export default function UserLatestTickets() {
 
   const columns: ColumnDef<Ticket>[] = [
     {
-      accessorKey: "id",
-      header: "ID",
-      cell: ({ row }) => (
-        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10">
-          {row.original.id.slice(0, 8).toUpperCase()}
-        </span>
-      ),
+      // Accessor returns the display reference so the table search matches it
+      id: "number",
+      accessorFn: (t) => ticketRef(t),
+      header: "Number",
+      cell: ({ row }) => <span className={TICKET_REF_CLASS}>{ticketRef(row.original)}</span>,
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "ticket_type",
+      header: "Type",
+      cell: ({ row }) => <TicketTypeBadge type={row.original.ticket_type} />,
       meta: { className: "whitespace-nowrap" },
     },
     {
@@ -146,6 +158,12 @@ export default function UserLatestTickets() {
           {statusLabel(row.original.status)}
         </StatusBadge>
       ),
+    },
+    {
+      accessorKey: "priority",
+      header: "Priority",
+      cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+      meta: { className: "whitespace-nowrap" },
     },
     {
       accessorKey: "category",

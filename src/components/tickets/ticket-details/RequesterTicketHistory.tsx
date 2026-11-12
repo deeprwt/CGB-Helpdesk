@@ -14,6 +14,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusBadge } from "@/components/common/status-badge"
 import { STATUS_TONE, statusLabel, timeAgo } from "@/lib/ticket-utils"
+import { TICKET_TYPE_LABELS, isTicketType, ticketRef } from "@/lib/itsm"
 
 type Props = {
   requesterId: string
@@ -24,6 +25,8 @@ type Props = {
 
 type Row = {
   id: string
+  number: string | null
+  ticket_type: string | null
   subject: string
   status: string
   created_at: string
@@ -51,7 +54,7 @@ export default function RequesterTicketHistory({
       setLoading(true)
       const { data } = await supabase
         .from("tickets")
-        .select("id, subject, status, created_at, assignee")
+        .select("id, number, ticket_type, subject, status, created_at, assignee")
         .eq("requester_id", requesterId)
         .neq("id", currentTicketId)
         .order("created_at", { ascending: false })
@@ -116,7 +119,8 @@ export default function RequesterTicketHistory({
                       {t.subject}
                     </p>
                     <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                      #{t.id.slice(0, 8).toUpperCase()} · {timeAgo(t.created_at)} ·{" "}
+                      {ticketRef(t)} · {TICKET_TYPE_LABELS[isTicketType(t.ticket_type) ? t.ticket_type : "incident"]} ·{" "}
+                      {timeAgo(t.created_at)} ·{" "}
                       {t.assignee
                         ? t.assignee === currentUserId
                           ? "You"

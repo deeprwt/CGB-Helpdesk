@@ -1,6 +1,8 @@
 import { NextResponse, after } from "next/server"
 import { jsonError, requireActor, staffCoversTicket } from "@/lib/ticket-server"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
+import { isPriority, isTicketType } from "@/lib/itsm"
+import { loadItsmConfig, slaDeadlines } from "@/lib/itsm-server"
 
 export const runtime = "nodejs"
 
@@ -26,14 +28,23 @@ export async function POST(req: Request) {
     if (ticket.status === "closed") return jsonError("This ticket is closed", 409)
     if (ticket.assignee) return jsonError("Ticket already acquired", 409)
 
+    // The resolution clock starts when the ticket is raised. Tickets from before
+    // SLA policies have no deadline yet: give them one from the policy, from now.
     const now = new Date()
+    let slaResolutionAt: string | null = ticket.sla_resolution_at
+    if (!slaResolutionAt) {
+      const config = await loadItsmConfig(db, ticket.tenant_id)
+      const type = isTicketType(ticket.ticket_type) ? ticket.ticket_type : "incident"
+      const priority = isPriority(ticket.priority) ? ticket.priority : "medium"
+      slaResolutionAt = slaDeadlines(config, type, priority, now).sla_resolution_at
+    }
     const { data: claimed, error } = await db
       .from("tickets")
       .update({
         assignee: me.id,
         status: "open",
         assigned_at: now.toISOString(),
-        sla_resolution_at: new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString(),
+        sla_resolution_at: slaResolutionAt,
       })
       .eq("id", ticket_id)
       .is("assignee", null)

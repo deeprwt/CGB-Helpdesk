@@ -28,7 +28,8 @@
 //
 // Lists take `limit` (at most 100) and `offset`, for paging.
 
-import { CATEGORY_MAP, PRIORITIES } from "@/lib/ticket-categories"
+import { LEVELS, REQUESTER_TICKET_TYPES } from "@/lib/itsm"
+import { loadItsmConfig } from "@/lib/itsm-server"
 import {
   BRAND,
   UUID_RE,
@@ -531,10 +532,24 @@ async function assetsAnswer(ctx: Ctx) {
 /* ── The New Ticket form ─────────────────────────────────── */
 
 async function optionsAnswer(ctx: Ctx) {
-  const mine = await assetsAnswer({ ...ctx, params: { scope: "mine" } })
+  const [mine, config] = await Promise.all([
+    assetsAnswer({ ...ctx, params: { scope: "mine" } }),
+    loadItsmConfig(db(), ctx.org.tenant_id),
+  ])
+  // The tenant's own categories that a requester can raise (incidents and service requests)
+  const active = config.categories.filter((c) => c.is_active)
+  const forRequesters = active.filter(
+    (c) => !c.parent_id && (!c.ticket_types || c.ticket_types.some((t) => REQUESTER_TICKET_TYPES.includes(t)))
+  )
   return {
-    categories: Object.entries(CATEGORY_MAP).map(([name, subs]) => ({ name, sub_categories: subs })),
-    priorities: [...PRIORITIES],
+    categories: forRequesters.map((p) => ({
+      name: p.name,
+      ticket_type: p.ticket_types && !p.ticket_types.includes("incident") ? "service_request" : "incident",
+      sub_categories: active.filter((c) => c.parent_id === p.id).map((c) => c.name),
+    })),
+    priorities: ["low", "medium", "high"],
+    impacts: [...LEVELS],
+    urgencies: [...LEVELS],
     contact: ctx.me.phone === null || ctx.me.phone === undefined ? null : String(ctx.me.phone),
     assets: mine.assets.map((a) => ({ id: a.id, code: a.code, type: a.type, model: a.model })),
   }

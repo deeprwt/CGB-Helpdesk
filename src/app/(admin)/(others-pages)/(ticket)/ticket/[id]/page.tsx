@@ -45,6 +45,22 @@ import TicketActivityTrail, {
   ActivityStatus,
 } from "@/components/tickets/ticket-details/TicketActivityTrail";
 import RequesterTicketHistory from "@/components/tickets/ticket-details/RequesterTicketHistory";
+import TicketClassification from "@/components/tickets/ticket-details/TicketClassification";
+import TicketSlaPanel from "@/components/tickets/ticket-details/TicketSlaPanel";
+import TicketLinks from "@/components/tickets/ticket-details/TicketLinks";
+import ProblemDetails from "@/components/tickets/ticket-details/ProblemDetails";
+import ChangeDetails from "@/components/tickets/ticket-details/ChangeDetails";
+import {
+  ITSM_ACTIVITY_LABELS,
+  itsmActivityComment,
+} from "@/components/tickets/ticket-details/TicketActivityTrail";
+import {
+  TYPE_TONE,
+  priorityOf,
+  typeOf,
+  type ItsmTicket,
+} from "@/components/tickets/ticket-details/itsm-ticket";
+import { PRIORITY_LABELS, TICKET_TYPE_LABELS, ticketRef } from "@/lib/itsm";
 import TicketStatusDialog from "@/components/tickets/TicketStatusDialog";
 import { isStaffRole, ticketPermissions } from "@/lib/ticket-access";
 import { toast } from "sonner";
@@ -61,12 +77,12 @@ type TicketStatus =
   | "hold"
   | "closed";
 
-type Ticket = {
+type Ticket = ItsmTicket & {
   id: string;
   subject: string;
   description: string | null;
   status: TicketStatus;
-  priority: "low" | "medium" | "high";
+  priority: string | null;
   requester_id: string;
   requester_name: string;
   tenant_id: string | null;
@@ -85,6 +101,7 @@ type Ticket = {
   sla_resolution_breached?: boolean;
   sla_response_at?: string | null;
   sla_resolution_at?: string | null;
+  sla_business_hours?: boolean | null;
 };
 
 type Message = {
@@ -169,6 +186,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 const PRIORITY_DOT: Record<string, string> = {
+  critical: "bg-rose-500",
   high: "bg-red-400",
   medium: "bg-amber-400",
   low: "bg-emerald-400",
@@ -183,6 +201,7 @@ const ACTIVITY_ACTION_LABELS: Record<string, string> = {
   reassigned: "Ticket Reassigned",
   sla_response_breach: "SLA Response Breach",
   sla_resolution_breach: "SLA Resolution Breach",
+  ...ITSM_ACTIVITY_LABELS,
 };
 
 const ACTIVITY_ACTION_STATUS: Record<string, ActivityStatus> = {
@@ -194,6 +213,9 @@ const ACTIVITY_ACTION_STATUS: Record<string, ActivityStatus> = {
   reassigned: "done",
   sla_response_breach: "hold",
   sla_resolution_breach: "hold",
+  updated: "done",
+  linked: "done",
+  unlinked: "done",
 };
 
 async function postJson(url: string, body: Record<string, unknown>) {
@@ -545,6 +567,8 @@ export default function TicketDetailsPage() {
           comment = `${details.previous_engineer_name ?? "Previous engineer"} → ${details.new_engineer_name ?? "New engineer"}`;
         } else if (a.action === "sla_response_breach" || a.action === "sla_resolution_breach") {
           comment = (details.message as string) ?? null;
+        } else {
+          comment = itsmActivityComment(a.action, details);
         }
 
         return {
@@ -597,13 +621,15 @@ export default function TicketDetailsPage() {
   const hasSlaBreach = slaResponseBreached || slaResolutionBreached;
 
   /* ── Hero header facts ── */
-  const shortId = ticket.id.slice(0, 8).toUpperCase();
+  const ref = ticketRef(ticket);
+  const recordType = typeOf(ticket);
+  const priority = priorityOf(ticket.priority);
+  // The IT team of the ticket's tenant may re-classify and link (the server checks again)
+  const canEditItsm = isStaff && (role === "superadmin" || !myTenantId || myTenantId === ticket.tenant_id);
   const categoryText = [ticket.category, ticket.sub_category].filter(Boolean).join(" / ");
   const heroMeta: PageHeaderMetaItem[] = [
     { label: statusLabel(ticket.status), dot: STATUS_DOT[ticket.status] ?? "bg-gray-400" },
-    ...(ticket.priority
-      ? [{ label: `${statusLabel(ticket.priority)} priority`, dot: PRIORITY_DOT[ticket.priority] ?? "bg-gray-400" }]
-      : []),
+    { label: PRIORITY_LABELS[priority], dot: PRIORITY_DOT[priority] ?? "bg-gray-400" },
     ...(categoryText ? [{ label: categoryText, dot: "bg-sky-400" }] : []),
     {
       label: (
@@ -622,8 +648,8 @@ export default function TicketDetailsPage() {
       {/* Header */}
       <PageHeader
         variant="hero"
-        breadcrumbs={[{ label: "Tickets", href: "/ticket" }, { label: `#${shortId}` }]}
-        eyebrow="Ticket"
+        breadcrumbs={[{ label: "Tickets", href: "/ticket" }, { label: ref }]}
+        eyebrow={ref}
         eyebrowIcon={TicketIcon}
         title={<span className="break-words">{ticket.subject}</span>}
         meta={heroMeta}
@@ -709,8 +735,8 @@ export default function TicketDetailsPage() {
           </>
         }
       >
-        {(hasSlaBreach || can.viewOnly) && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <StatusBadge tone={TYPE_TONE[recordType]}>{TICKET_TYPE_LABELS[recordType]}</StatusBadge>
             {hasSlaBreach && (
               <StatusBadge tone="red">
                 <AlertTriangle className="h-3 w-3" />
@@ -725,8 +751,7 @@ export default function TicketDetailsPage() {
                   : "Unassigned · Acquire it to start working"}
               </StatusBadge>
             )}
-          </div>
-        )}
+        </div>
       </PageHeader>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
@@ -734,6 +759,7 @@ export default function TicketDetailsPage() {
         <div className="min-w-0 xl:col-span-8">
           <TicketChat
             ticketId={id}
+            ticketRef={ref}
             ticketSubject={ticket.subject}
             messages={messages}
             setMessages={setMessages}
@@ -760,14 +786,31 @@ export default function TicketDetailsPage() {
               return true;
             }}
           />
+
+          {/* Problem / change records carry their own details */}
+          {recordType === "problem" && (
+            <div className="mt-6">
+              <ProblemDetails ticket={ticket} canEdit={canEditItsm} onSaved={loadData} />
+            </div>
+          )}
+          {recordType === "change" && (
+            <div className="mt-6">
+              <ChangeDetails ticket={ticket} canEdit={canEditItsm} onSaved={loadData} />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <TicketLinks ticketId={ticket.id} canEdit={canEditItsm} onChanged={loadData} />
+          </div>
         </div>
 
         {/* Details & Activity */}
         <div className="flex min-w-0 flex-col gap-6 xl:col-span-4">
           <TicketMetaPanel
-            ticketId={ticket.id}
+            ticketRef={ref}
+            ticketType={recordType}
             subject={ticket.subject}
-            priority={ticket.priority}
+            priority={priority}
             requesterName={ticket.requester_name}
             assigneeText={ticket.assignee ? assigneeName ?? "Engineer" : null}
             createdAt={ticket.created_at}
@@ -776,22 +819,16 @@ export default function TicketDetailsPage() {
             link={ticket.link}
             description={ticket.description}
             status={ticket.status}
-            category={ticket.category}
-            subCategory={ticket.sub_category}
             engineers={uniqueEngineers.map((a) => ({
               id: a.engineer_id,
               name: a.engineer_name ?? "Engineer",
             }))}
-            sla={{
-              responseAt: ticket.sla_response_at,
-              resolutionAt: ticket.sla_resolution_at,
-              responseBreached: slaResponseBreached,
-              resolutionBreached: slaResolutionBreached,
-              holdUntil: ticket.hold_until,
-              holdStartedAt: ticket.hold_started_at,
-              holdDurationHours: ticket.hold_duration_hours,
-            }}
+            resolutionDue={ticket.sla_resolution_at}
           />
+
+          <TicketClassification ticket={ticket} canEdit={canEditItsm} onSaved={loadData} />
+
+          <TicketSlaPanel ticket={ticket} />
 
           <TicketActivityTrail items={activityItems} />
 

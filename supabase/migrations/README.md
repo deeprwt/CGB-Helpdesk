@@ -23,7 +23,9 @@ Then apply the files in this folder:
 
 | File | What |
 |---|---|
-| `20261111120000_tenancy_foundation.sql` | Tenants, `tenant_id` everywhere (all existing data → **CGB Solutions**), tenant-scoped RLS, browser writes removed, server-only sign-up trigger |
+| `20261111120000_tenancy_foundation.sql` | Tenants, `tenant_id` everywhere (all existing data → **CGB Solutions**), tenant-scoped RLS, browser writes removed, server-only sign-up trigger. **Applied to production 2026-11-12.** |
+| `20261112120000_itsm_core.sql` | Record types (incident / service request / problem / change), per-tenant numbering (INC0001001…), per-tenant categories, impact × urgency priority matrix, SLA policies, business hours & holidays, ticket links. Additive: safe to apply before the matching app deploy. |
+| `20261112130000_sla_scheduler.sql` | pg_cron + pg_net job calling `/api/sla/check` every 2 min; URL and secret read from Supabase Vault (`sla_check_url`, `cron_secret`). Apply **after** the ITSM app version is live and `CRON_SECRET` is set in Vercel. |
 
 ## Before applying `20261111120000_tenancy_foundation.sql`
 

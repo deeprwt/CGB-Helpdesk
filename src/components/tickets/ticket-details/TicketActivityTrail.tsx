@@ -8,7 +8,10 @@ import {
   Circle,
   Clock,
   History,
+  Link2,
+  Link2Off,
   PauseCircle,
+  PencilLine,
   RotateCcw,
   Ticket,
   UserCheck,
@@ -16,7 +19,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { timeAgo } from "@/lib/ticket-utils";
+import { statusLabel, timeAgo } from "@/lib/ticket-utils";
+import {
+  LINK_TYPE_LABELS,
+  PRIORITY_LABELS,
+  TICKET_TYPE_LABELS,
+  isLevel,
+  isPriority,
+  isTicketType,
+  type LinkType,
+} from "@/lib/itsm";
 import {
   Card,
   CardAction,
@@ -98,7 +110,95 @@ const ACTION_VISUAL: Record<string, { icon: LucideIcon; tone: Tone }> = {
   reassigned: { icon: ArrowRightLeft, tone: "sky" },
   sla_response_breach: { icon: AlertTriangle, tone: "rose" },
   sla_resolution_breach: { icon: AlertTriangle, tone: "rose" },
+  updated: { icon: PencilLine, tone: "indigo" },
+  linked: { icon: Link2, tone: "sky" },
+  unlinked: { icon: Link2Off, tone: "gray" },
 };
+
+/* -----------------------------------
+   ITSM actions (exported for the page that builds the items)
+----------------------------------- */
+export const ITSM_ACTIVITY_LABELS: Record<string, string> = {
+  updated: "Ticket Updated",
+  linked: "Record Linked",
+  unlinked: "Link Removed",
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  ticket_type: "Type",
+  number: "Number",
+  category: "Category",
+  sub_category: "Sub-category",
+  impact: "Impact",
+  urgency: "Urgency",
+  priority: "Priority",
+  subject: "Subject",
+  description: "Description",
+  root_cause: "Root cause",
+  workaround: "Workaround",
+  known_error: "Known error",
+  change_type: "Change type",
+  risk: "Risk",
+  planned_start: "Planned start",
+  planned_end: "Planned end",
+  implementation_plan: "Implementation plan",
+  backout_plan: "Backout plan",
+};
+
+/** Long text: only say it changed, the values don't fit a timeline. */
+const LONG_FIELDS = new Set(["description", "root_cause", "workaround", "implementation_plan", "backout_plan"]);
+
+function fieldValue(field: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "none";
+  if (field === "priority" && isPriority(v)) return PRIORITY_LABELS[v];
+  if (field === "ticket_type" && isTicketType(v)) return TICKET_TYPE_LABELS[v];
+  if (field === "known_error") return v === true ? "Yes" : "No";
+  if ((field === "planned_start" || field === "planned_end") && typeof v === "string") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime())
+      ? v
+      : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+  if (isLevel(v) || field === "change_type") return statusLabel(String(v));
+  return String(v);
+}
+
+function linkLabel(t: unknown) {
+  return typeof t === "string" && t in LINK_TYPE_LABELS ? LINK_TYPE_LABELS[t as LinkType] : "Linked to";
+}
+
+/** Comment text for the ITSM actions (updated, linked, unlinked); null for others. */
+export function itsmActivityComment(action: string, details: Record<string, unknown>): string | null {
+  if (action === "updated") {
+    const fields = Array.isArray(details.fields) ? (details.fields as string[]) : [];
+    const from = (details.from ?? {}) as Record<string, unknown>;
+    const to = (details.to ?? {}) as Record<string, unknown>;
+    const lines = fields.map((f) => {
+      const name = FIELD_LABELS[f] ?? statusLabel(f);
+      if (LONG_FIELDS.has(f)) return `${name} updated`;
+      return `${name}: ${fieldValue(f, from[f])} → ${fieldValue(f, to[f])}`;
+    });
+    return lines.length ? lines.join("\n") : null;
+  }
+  // "in" = the link was made from the other ticket to this one, so read it the other way round
+  const INVERSE: Record<string, string> = {
+    related: "Related to",
+    caused_by: "Causes",
+    duplicate_of: "Duplicated by",
+    implements: "Implements",
+  };
+  const label = () =>
+    details.direction === "in"
+      ? INVERSE[String(details.link_type)] ?? linkLabel(details.link_type)
+      : linkLabel(details.link_type);
+  if (action === "linked") {
+    return `${label()} ${details.to ?? "another ticket"}`;
+  }
+  if (action === "unlinked") {
+    return details.to ? `Removed link: ${label()} ${details.to}` : `Removed "${label()}" link`;
+  }
+  return null;
+}
 
 const STATUS_VISUAL: Record<ActivityStatus, { icon: LucideIcon; tone: Tone }> = {
   done: { icon: CheckCircle2, tone: "emerald" },

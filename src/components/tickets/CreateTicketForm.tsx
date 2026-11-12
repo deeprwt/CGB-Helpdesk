@@ -39,24 +39,54 @@ import {
   FieldLegend,
   FieldSet,
 } from "@/components/ui/field"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
+  AlertTriangle,
+  CalendarClock,
   Check,
   ChevronsUpDown,
   ClipboardList,
   FileText,
+  Gauge,
   Loader2,
+  Package,
   Paperclip,
+  RefreshCw,
+  SearchCode,
   Send,
   UploadCloud,
   UserRound,
+  Wrench,
   X,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { cn } from "@/lib/utils"
-import { CATEGORY_MAP } from "@/lib/ticket-categories"
 import { getInitials } from "@/hooks/useCurrentUser"
+import { apiFetch } from "@/lib/api-client"
+import { isStaffRole } from "@/lib/ticket-access"
+import {
+  CHANGE_TYPES,
+  IMPACT_LABELS,
+  LEVELS,
+  PRIORITIES,
+  PRIORITY_LABELS,
+  REQUESTER_TICKET_TYPES,
+  TICKET_TYPES,
+  TICKET_TYPE_LABELS,
+  URGENCY_LABELS,
+  formatMinutes,
+  isPriority,
+  pickPolicy,
+  priorityFromMatrix,
+  type Level,
+  type MatrixCell,
+  type SlaPolicy,
+  type TicketType,
+} from "@/lib/itsm"
+import { PRIORITY_TONE } from "@/components/tickets/TicketBadges"
+import { StatusBadge } from "@/components/common/status-badge"
 
 /* -----------------------------------
    Layout helpers (presentational only)
@@ -68,6 +98,8 @@ const CHIP_TONES = {
     "bg-violet-50 text-violet-600 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/20",
   emerald:
     "bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/20",
+  amber:
+    "bg-amber-50 text-amber-600 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/20",
 } as const
 
 function SectionLegend({
@@ -128,13 +160,64 @@ type AssetOption = {
 
 const USER_COLUMNS = "id, full_name, email, phone, role, tenant_id"
 
+type ConfigCategory = {
+  id: string
+  parent_id: string | null
+  name: string
+  ticket_types: TicketType[] | null
+  sort_order: number
+  is_active: boolean
+}
+
+type ItsmConfig = {
+  tenant_id: string
+  categories: ConfigCategory[]
+  matrix: MatrixCell[]
+  policies: SlaPolicy[]
+}
+
+const TYPE_OPTIONS: Record<TicketType, { icon: LucideIcon; description: string }> = {
+  incident: { icon: AlertTriangle, description: "Something is broken" },
+  service_request: { icon: Package, description: "I need something" },
+  problem: { icon: SearchCode, description: "Find the cause of repeat incidents" },
+  change: { icon: RefreshCw, description: "Plan a change to a service" },
+}
+
+const CHANGE_TYPE_LABELS: Record<(typeof CHANGE_TYPES)[number], string> = {
+  standard: "Standard (pre-approved)",
+  normal: "Normal",
+  emergency: "Emergency",
+}
+
+const RISK_LABELS: Record<Level, string> = { low: "Low", medium: "Medium", high: "High" }
+
+/** Active top-level categories offered for a record type (null ticket_types = every type). */
+function categoriesFor(config: ItsmConfig | null, type: TicketType) {
+  if (!config) return []
+  return config.categories.filter(
+    (c) => !c.parent_id && c.is_active && (!c.ticket_types || c.ticket_types.includes(type))
+  )
+}
+
 export default function CreateTicketForm() {
   const router = useRouter()
   const formRef = React.useRef<HTMLFormElement | null>(null)
 
   const [loading, setLoading] = React.useState(false)
   const [category, setCategory] = React.useState("")
+  const [subCategory, setSubCategory] = React.useState("")
   const [role, setRole] = React.useState<Role>("user")
+  const staff = isStaffRole(role)
+
+  /* ITSM: record type, the tenant's categories / priority matrix / SLA policies */
+  const [ticketType, setTicketType] = React.useState<TicketType>("incident")
+  const [config, setConfig] = React.useState<ItsmConfig | null>(null)
+  const [configError, setConfigError] = React.useState<string | null>(null)
+  const [configReload, setConfigReload] = React.useState(0)
+  const [impact, setImpact] = React.useState<Level>("low")
+  const [urgency, setUrgency] = React.useState<Level>("low")
+  const [priorityOverride, setPriorityOverride] = React.useState("auto")
+  const [knownError, setKnownError] = React.useState(false)
 
   const [users, setUsers] = React.useState<UserLite[]>([])
   const [selectedUser, setSelectedUser] = React.useState<UserLite | null>(null)
@@ -198,6 +281,63 @@ export default function CreateTicketForm() {
   }, [])
 
   /* -----------------------------------
+     Load the ITSM config of the ticket's tenant
+     (a ticket belongs to its requester's tenant; only a
+     super admin can raise one in another tenant).
+  ----------------------------------- */
+  const configTenant = selectedUser?.tenant_id ?? null
+  const hasRequester = !!selectedUser
+  React.useEffect(() => {
+    if (!hasRequester) return
+    let active = true
+    setConfig(null)
+    setConfigError(null)
+    const qs = configTenant ? `?tenant_id=${encodeURIComponent(configTenant)}` : ""
+    apiFetch<ItsmConfig>(`/api/itsm/config${qs}`)
+      .then((cfg) => {
+        if (active) setConfig(cfg)
+      })
+      .catch((err: unknown) => {
+        if (active) setConfigError(err instanceof Error ? err.message : "Could not load categories")
+      })
+    return () => {
+      active = false
+    }
+  }, [configTenant, hasRequester, configReload])
+
+  const typeCategories = React.useMemo(() => categoriesFor(config, ticketType), [config, ticketType])
+  const parentCategory = typeCategories.find((c) => c.name === category) ?? null
+  const subCategories = React.useMemo(
+    () =>
+      parentCategory && config
+        ? config.categories.filter((c) => c.parent_id === parentCategory.id && c.is_active)
+        : [],
+    [config, parentCategory]
+  )
+
+  // Drop a category (or sub category) that isn't offered for the chosen type / tenant
+  React.useEffect(() => {
+    if (!config) return
+    if (category && !typeCategories.some((c) => c.name === category)) {
+      setCategory("")
+      setSubCategory("")
+    } else if (subCategory && !subCategories.some((c) => c.name === subCategory)) {
+      setSubCategory("")
+    }
+  }, [config, category, subCategory, typeCategories, subCategories])
+
+  const allowedTypes: readonly TicketType[] = staff ? TICKET_TYPES : REQUESTER_TICKET_TYPES
+  // A requester can never keep a staff-only type selected
+  React.useEffect(() => {
+    if (!allowedTypes.includes(ticketType)) setTicketType("incident")
+  }, [allowedTypes, ticketType])
+
+  const matrixPriority = priorityFromMatrix(config?.matrix ?? [], impact, urgency)
+  const effectivePriority =
+    staff && isPriority(priorityOverride) ? priorityOverride : matrixPriority
+  const policy = config ? pickPolicy(config.policies, ticketType, effectivePriority) : null
+
+  /* -----------------------------------
      Load assets that can be linked.
      The database (RLS) decides what is visible: the IT team sees its
      tenant's assets, a user only the assets assigned to them. Staff raising
@@ -239,6 +379,10 @@ export default function CreateTicketForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formRef.current || !selectedUser) return
+    if (!config) {
+      toast.error("Categories haven't loaded yet. Try again in a moment.")
+      return
+    }
 
     setLoading(true)
 
@@ -248,6 +392,20 @@ export default function CreateTicketForm() {
 
       const formData = new FormData(formRef.current)
       formData.set("requester_id", selectedUser.id)
+      formData.set("ticket_type", ticketType)
+      formData.set("impact", impact)
+      formData.set("urgency", urgency)
+      // Priority comes from impact × urgency on the server; only staff may override it
+      formData.delete("priority")
+      if (staff && isPriority(priorityOverride)) formData.set("priority", priorityOverride)
+      if (staff && ticketType === "problem") formData.set("known_error", knownError ? "true" : "false")
+      // datetime-local has no zone: send the instant as the person meant it in their own time zone
+      for (const key of ["planned_start", "planned_end"]) {
+        const v = formData.get(key)?.toString()
+        if (!v) continue
+        const d = new Date(v)
+        if (!Number.isNaN(d.getTime())) formData.set(key, d.toISOString())
+      }
 
       const res = await fetch("/api/tickets/create", {
         method: "POST",
@@ -260,11 +418,14 @@ export default function CreateTicketForm() {
       const result = await res.json().catch(() => null)
       if (!res.ok || !result?.ticketId) throw new Error(result?.error ?? "Failed")
 
-      toast.success("Ticket created successfully")
+      toast.success(
+        result.number ? `${result.number} created` : `${TICKET_TYPE_LABELS[ticketType]} created`
+      )
       // Button stays disabled while navigating, so it can't be submitted twice
       router.push(`/ticket/${result.ticketId}`)
-    } catch {
-      toast.error("Failed to create ticket")
+    } catch (err) {
+      const msg = err instanceof Error && err.message !== "Failed" ? err.message : null
+      toast.error(msg ? `Failed to create ticket: ${msg}` : "Failed to create ticket")
       setLoading(false)
     }
   }
@@ -298,6 +459,62 @@ export default function CreateTicketForm() {
       onReset={() => setPickedFiles([])}
       className="flex flex-col gap-6"
     >
+      {/* Record type */}
+      <Card>
+        <CardContent>
+          <FieldSet>
+            <SectionLegend
+              icon={FileText}
+              tone="indigo"
+              title="What do you need?"
+              description="Pick the kind of record so it gets the right handling and targets."
+            />
+            <div
+              role="radiogroup"
+              aria-label="Record type"
+              className={cn(
+                "grid gap-3 sm:grid-cols-2",
+                allowedTypes.length > 2 && "lg:grid-cols-4"
+              )}
+            >
+              {allowedTypes.map((t) => {
+                const opt = TYPE_OPTIONS[t]
+                const Icon = opt.icon
+                const selected = ticketType === t
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setTicketType(t)}
+                    className={cn(
+                      "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
+                      selected
+                        ? "border-brand-300 bg-brand-50/60 ring-1 ring-brand-200 dark:border-brand-500/40 dark:bg-brand-500/10 dark:ring-brand-500/20"
+                        : "border-gray-200 hover:bg-gray-50 dark:border-white/10 dark:hover:bg-white/[0.03]"
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        "mt-0.5 size-4 shrink-0",
+                        selected ? "text-brand-600 dark:text-brand-300" : "text-gray-400"
+                      )}
+                    />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        {TICKET_TYPE_LABELS[t]}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">{opt.description}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </FieldSet>
+        </CardContent>
+      </Card>
+
       {/* Requester */}
       <Card>
         <CardContent>
@@ -462,51 +679,158 @@ export default function CreateTicketForm() {
                 />
               </Field>
 
-              {/* Category */}
+              {/* Category (the tenant's list for this record type) */}
+              {configError ? (
+                <Field className="md:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                    <span>Couldn&apos;t load categories and priorities: {configError}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfigReload((n) => n + 1)}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                </Field>
+              ) : !config ? (
+                <>
+                  <Field>
+                    <FieldLabel>Category</FieldLabel>
+                    <Skeleton className="h-11 w-full" />
+                  </Field>
+                  <Field>
+                    <FieldLabel>Sub Category</FieldLabel>
+                    <Skeleton className="h-11 w-full" />
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="category">Category</FieldLabel>
+                    <Select
+                      name="category"
+                      value={category}
+                      onValueChange={(v) => {
+                        setCategory(v)
+                        setSubCategory("")
+                      }}
+                      disabled={typeCategories.length === 0}
+                    >
+                      <SelectTrigger id="category">
+                        <SelectValue
+                          placeholder={
+                            typeCategories.length ? "Select category" : "No categories for this type"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {typeCategories.map((c) => (
+                          <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="sub_category">Sub Category</FieldLabel>
+                    <Select
+                      name="sub_category"
+                      value={subCategory}
+                      onValueChange={setSubCategory}
+                      disabled={!category || subCategories.length === 0}
+                    >
+                      <SelectTrigger id="sub_category">
+                        <SelectValue
+                          placeholder={
+                            !category
+                              ? "Choose a category first"
+                              : subCategories.length
+                                ? "Select sub category"
+                                : "No sub categories"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {subCategories.map((s) => (
+                          <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </>
+              )}
+
+              {/* Impact × urgency → priority */}
               <Field>
-                <FieldLabel htmlFor="category">Category</FieldLabel>
-                <Select name="category" value={category} onValueChange={setCategory}>
-                  <SelectTrigger id="category">
-                    <SelectValue placeholder="Select category" />
+                <FieldLabel htmlFor="impact">Impact</FieldLabel>
+                <Select value={impact} onValueChange={(v) => setImpact(v as Level)}>
+                  <SelectTrigger id="impact">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.keys(CATEGORY_MAP).map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    {[...LEVELS].reverse().map((l) => (
+                      <SelectItem key={l} value={l}>{IMPACT_LABELS[l]}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="sub_category">Sub Category</FieldLabel>
-                <Select name="sub_category" disabled={!category}>
-                  <SelectTrigger id="sub_category">
-                    <SelectValue
-                      placeholder={category ? "Select sub category" : "Choose a category first"}
-                    />
+                <FieldLabel htmlFor="urgency">Urgency</FieldLabel>
+                <Select value={urgency} onValueChange={(v) => setUrgency(v as Level)}>
+                  <SelectTrigger id="urgency">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(CATEGORY_MAP[category] ?? []).map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    {[...LEVELS].reverse().map((l) => (
+                      <SelectItem key={l} value={l}>{URGENCY_LABELS[l]}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
 
-              {/* Priority */}
-              <Field>
-                <FieldLabel htmlFor="priority">Priority</FieldLabel>
-                <Select name="priority">
-                  <SelectTrigger id="priority">
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                  </SelectContent>
-                </Select>
+              <Field className="md:col-span-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-gray-200 bg-gray-50/60 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/[0.02]">
+                  <span className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                    <Gauge className="size-4 text-gray-400" />
+                    Priority:
+                    <StatusBadge tone={PRIORITY_TONE[effectivePriority]}>
+                      {PRIORITY_LABELS[effectivePriority]}
+                    </StatusBadge>
+                    {staff && isPriority(priorityOverride) && priorityOverride !== matrixPriority && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">(overridden)</span>
+                    )}
+                  </span>
+                  {config && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {policy
+                        ? `First response within ${formatMinutes(policy.response_minutes)} · resolution within ${formatMinutes(policy.resolution_minutes)}${policy.business_hours ? " (business hours)" : ""}`
+                        : "No SLA target set for this priority"}
+                    </span>
+                  )}
+                </div>
               </Field>
+
+              {staff && (
+                <Field>
+                  <FieldLabel htmlFor="priority_override">Override priority</FieldLabel>
+                  <Select value={priorityOverride} onValueChange={setPriorityOverride}>
+                    <SelectTrigger id="priority_override">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">
+                        Use impact × urgency ({PRIORITY_LABELS[matrixPriority]})
+                      </SelectItem>
+                      {[...PRIORITIES].reverse().map((p) => (
+                        <SelectItem key={p} value={p}>{PRIORITY_LABELS[p]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
 
               {/* Location */}
               <Field>
@@ -526,6 +850,122 @@ export default function CreateTicketForm() {
           </FieldSet>
         </CardContent>
       </Card>
+
+      {/* Problem details (IT team only) */}
+      {staff && ticketType === "problem" && (
+        <Card>
+          <CardContent>
+            <FieldSet>
+              <SectionLegend
+                icon={Wrench}
+                tone="amber"
+                title="Problem details"
+                description="What's known so far about the underlying cause."
+              />
+              <FieldGroup className="md:grid-cols-2">
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="root_cause">Root cause</FieldLabel>
+                  <Textarea
+                    id="root_cause"
+                    name="root_cause"
+                    placeholder="Known or suspected cause"
+                    className="min-h-24"
+                  />
+                </Field>
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="workaround">Workaround</FieldLabel>
+                  <Textarea
+                    id="workaround"
+                    name="workaround"
+                    placeholder="How people can keep working until it's fixed"
+                    className="min-h-24"
+                  />
+                </Field>
+                <Field orientation="horizontal" className="md:col-span-2">
+                  <Checkbox
+                    id="known_error"
+                    checked={knownError}
+                    onCheckedChange={(v) => setKnownError(v === true)}
+                  />
+                  <FieldLabel htmlFor="known_error" className="font-normal">
+                    Known error (root cause and workaround are documented)
+                  </FieldLabel>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Change details (IT team only) */}
+      {staff && ticketType === "change" && (
+        <Card>
+          <CardContent>
+            <FieldSet>
+              <SectionLegend
+                icon={CalendarClock}
+                tone="amber"
+                title="Change details"
+                description="Type, risk, schedule and how to roll it out or back."
+              />
+              <FieldGroup className="md:grid-cols-2">
+                <Field>
+                  <FieldLabel htmlFor="change_type">Change type</FieldLabel>
+                  <Select name="change_type" defaultValue="normal">
+                    <SelectTrigger id="change_type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANGE_TYPES.map((c) => (
+                        <SelectItem key={c} value={c}>{CHANGE_TYPE_LABELS[c]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="risk">Risk</FieldLabel>
+                  <Select name="risk">
+                    <SelectTrigger id="risk">
+                      <SelectValue placeholder="Select risk" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEVELS.map((l) => (
+                        <SelectItem key={l} value={l}>{RISK_LABELS[l]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="planned_start">Planned start</FieldLabel>
+                  <Input id="planned_start" name="planned_start" type="datetime-local" />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="planned_end">Planned end</FieldLabel>
+                  <Input id="planned_end" name="planned_end" type="datetime-local" />
+                </Field>
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="implementation_plan">Implementation plan</FieldLabel>
+                  <Textarea
+                    id="implementation_plan"
+                    name="implementation_plan"
+                    placeholder="Steps to carry out the change"
+                    className="min-h-24"
+                  />
+                </Field>
+                <Field className="md:col-span-2">
+                  <FieldLabel htmlFor="backout_plan">Backout plan</FieldLabel>
+                  <Textarea
+                    id="backout_plan"
+                    name="backout_plan"
+                    placeholder="How to undo the change if it goes wrong"
+                    className="min-h-24"
+                  />
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Asset & attachments */}
       <Card>

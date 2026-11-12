@@ -15,6 +15,8 @@ import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { timeAgo, STATUS_TONE, statusLabel } from "@/lib/ticket-utils"
 import { getInitials } from "@/hooks/useCurrentUser"
+import { ticketRef } from "@/lib/itsm"
+import { PriorityBadge, TicketTypeBadge, TICKET_REF_CLASS } from "@/components/tickets/TicketBadges"
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -22,6 +24,9 @@ type Tab = "queue" | "mytask" | "raised" | "all"
 
 type Ticket = {
   id: string
+  number: string | null
+  ticket_type: string | null
+  priority: string | null
   subject: string
   location: string | null
   requester_id: string
@@ -73,6 +78,7 @@ export default function EngineerTicketTable() {
   const [search, setSearch] = React.useState("")
   const [status, setStatus] = React.useState("all")
   const [category, setCategory] = React.useState("all")
+  const [ticketType, setTicketType] = React.useState("all")
 
   const [page, setPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
@@ -104,7 +110,10 @@ export default function EngineerTicketTable() {
         .order("created_at", { ascending: false })
       if (status !== "all") q = q.eq("status", status)
       if (category !== "all") q = q.eq("category", category)
-      if (search) q = q.ilike("subject", `%${search}%`)
+      if (ticketType !== "all") q = q.eq("ticket_type", ticketType)
+      // Characters that would break the or() filter syntax are dropped
+      const term = search.replace(/[,()"\\*%]/g, " ").trim()
+      if (term) q = q.or(`subject.ilike.%${term}%,number.ilike.%${term}%`)
       return q
     }
 
@@ -204,7 +213,7 @@ export default function EngineerTicketTable() {
       active = false
       supabase.removeChannel(channel)
     }
-  }, [tab, search, status, category, page, pageSize])
+  }, [tab, search, status, category, ticketType, page, pageSize])
 
   /* Acquire runs on the server: it only succeeds while the ticket is still
      unassigned, and the requester is notified there (web + email). */
@@ -243,13 +252,15 @@ export default function EngineerTicketTable() {
 
   const columns: ColumnDef<Ticket>[] = [
     {
-      accessorKey: "id",
-      header: "Ticket ID",
-      cell: ({ row }) => (
-        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 font-mono text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10">
-          {row.original.id.slice(0, 8).toUpperCase()}
-        </span>
-      ),
+      accessorKey: "number",
+      header: "Number",
+      cell: ({ row }) => <span className={TICKET_REF_CLASS}>{ticketRef(row.original)}</span>,
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
+      accessorKey: "ticket_type",
+      header: "Type",
+      cell: ({ row }) => <TicketTypeBadge type={row.original.ticket_type} />,
       meta: { className: "whitespace-nowrap" },
     },
     {
@@ -338,6 +349,12 @@ export default function EngineerTicketTable() {
       ),
     },
     {
+      accessorKey: "priority",
+      header: "Priority",
+      cell: ({ row }) => <PriorityBadge priority={row.original.priority} />,
+      meta: { className: "whitespace-nowrap" },
+    },
+    {
       accessorKey: "category",
       header: "Category",
       cell: ({ row }) => (
@@ -407,7 +424,7 @@ export default function EngineerTicketTable() {
       title="Engineer Tickets"
       description={copy.description}
       searchable
-      searchPlaceholder="Search by subject…"
+      searchPlaceholder="Search by subject or number…"
       search={search}
       onSearchChange={setSearch}
       filters={
@@ -415,7 +432,15 @@ export default function EngineerTicketTable() {
           status={status}
           setStatus={setStatus}
           category={category}
-          setCategory={setCategory}
+          setCategory={(v) => {
+            setCategory(v)
+            setPage(1)
+          }}
+          ticketType={ticketType}
+          setTicketType={(v) => {
+            setTicketType(v)
+            setPage(1)
+          }}
         />
       }
       subHeader={

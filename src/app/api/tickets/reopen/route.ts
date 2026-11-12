@@ -2,6 +2,8 @@ import { NextResponse, after } from "next/server"
 import { jsonError, requireActor, staffCoversTicket } from "@/lib/ticket-server"
 import { ticketPermissions } from "@/lib/ticket-access"
 import { notifyTicketEvent } from "@/lib/ticket-notify"
+import { isPriority, isTicketType } from "@/lib/itsm"
+import { deadlineAfterHold, loadItsmConfig, slaDeadlines } from "@/lib/itsm-server"
 
 export const runtime = "nodejs"
 
@@ -37,18 +39,18 @@ export async function POST(req: Request) {
     const changedMeanwhile = () =>
       jsonError("The ticket was changed by someone else. Refresh and try again.", 409)
 
-    /* 2. Calculate new SLA resolution deadline */
-    // If coming from hold, account for paused time
+    /* 2. Calculate new SLA resolution deadline (from the tenant's SLA policy and calendar) */
+    const config = await loadItsmConfig(db, ticket.tenant_id)
     let slaResolutionAt = ticket.sla_resolution_at
     if (ticket.status === "hold" && ticket.hold_started_at) {
-      const pausedMs = Date.now() - new Date(ticket.hold_started_at).getTime()
+      // Resume: the SLA time left when the hold started is given back from now.
+      // A deadline already missed before the hold stays missed.
+      const now = new Date()
+      const pausedMs = now.getTime() - new Date(ticket.hold_started_at).getTime()
       const totalPausedMs = (ticket.sla_paused_ms ?? 0) + pausedMs
-
-      // Extend SLA deadline by the paused duration
-      if (ticket.sla_resolution_at) {
-        const originalDeadline = new Date(ticket.sla_resolution_at).getTime()
-        slaResolutionAt = new Date(originalDeadline + pausedMs).toISOString()
-      }
+      const missedBeforeHold =
+        !!ticket.sla_resolution_at && new Date(ticket.sla_resolution_at) <= new Date(ticket.hold_started_at)
+      slaResolutionAt = deadlineAfterHold(config, ticket, now)
 
       const { data: updated, error } = await db
         .from("tickets")
@@ -60,7 +62,7 @@ export async function POST(req: Request) {
           hold_until: null,
           sla_paused_ms: totalPausedMs,
           sla_resolution_at: slaResolutionAt,
-          sla_resolution_breached: false,
+          sla_resolution_breached: missedBeforeHold ? ticket.sla_resolution_breached : false,
         })
         .eq("id", ticket_id)
         .eq("status", ticket.status)
@@ -68,8 +70,10 @@ export async function POST(req: Request) {
       if (error) throw error
       if (!updated || updated.length === 0) return changedMeanwhile()
     } else {
-      // Reopening from closed — reset resolution SLA (6 hours from now)
-      slaResolutionAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
+      // Reopening from closed: a fresh resolution deadline from the policy, from now
+      const type = isTicketType(ticket.ticket_type) ? ticket.ticket_type : "incident"
+      const priority = isPriority(ticket.priority) ? ticket.priority : "medium"
+      slaResolutionAt = slaDeadlines(config, type, priority, new Date()).sla_resolution_at
 
       const { data: updated, error } = await db
         .from("tickets")
